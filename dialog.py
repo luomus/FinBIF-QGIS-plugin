@@ -2,8 +2,7 @@ from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QCombo
 from PyQt5.QtCore import QSettings, Qt
 from .api import fetch_data
 import json
-from qgis.core import QgsProject, QgsVectorLayer, QgsCoordinateReferenceSystem
-import tempfile, os
+from qgis.core import QgsProject, QgsVectorLayer, QgsCoordinateReferenceSystem, QgsJsonUtils
 from .custom_widgets import *
 
 class FinBIFDialog(QDialog):
@@ -457,6 +456,7 @@ class FinBIFDialog(QDialog):
             multiline_features = [feature for feature in all_features if feature['geometry']['type'] == 'MultiLineString']
             multipolygon_features = [feature for feature in all_features if feature['geometry']['type'] == 'MultiPolygon']
 
+            # Convert GeometryCollections to other types
             for feature in geometrycollection_features:
                 geometries = feature['geometry']['geometries']
                 for geom in geometries:
@@ -474,32 +474,58 @@ class FinBIFDialog(QDialog):
                         multiline_features.append(new_feature)
                     elif geom['type'] == 'MultiPolygon':
                         multipolygon_features.append(new_feature)
- 
-            def create_layer(features, feature_type):
-                """Helper function to create a QgsVectorLayer from feature data."""
-                if features:
-                    layer = QgsVectorLayer(json.dumps({"type": "FeatureCollection", "features": features}), f"FinBIF {feature_type}s", 'ogr')
-                    if layer.isValid():
-                        if self.crs_combo.currentText() == 'EUREF':
-                            crs = QgsCoordinateReferenceSystem('EPSG:3067') 
-                        elif self.crs_combo.currentText() == 'YKJ':
-                            crs = QgsCoordinateReferenceSystem('EPSG:2393') 
-                        elif self.crs_combo.currentText() == 'WGS84':
-                            crs = QgsCoordinateReferenceSystem('EPSG:4326') 
-                        else:
-                            crs = QgsCoordinateReferenceSystem('EPSG:4326')  # Default to WGS 84
+                    else:
+                        pass
+                        # GeometryCollection has GeometryCollections ??
 
+            if self.crs_combo.currentText() == 'EUREF':
+                crs = QgsCoordinateReferenceSystem('EPSG:3067') 
+            elif self.crs_combo.currentText() == 'YKJ':
+                crs = QgsCoordinateReferenceSystem('EPSG:2393') 
+            elif self.crs_combo.currentText() == 'WGS84':
+                crs = QgsCoordinateReferenceSystem('EPSG:4326') 
+            else:
+                crs = QgsCoordinateReferenceSystem('EPSG:4326')  # Default to WGS 84
+
+            def create_layer(features, geometry_type, crs):
+                """Create a QGIS memory layer from GeoJSON-like features."""
+                if features:
+                    # Determine the field definitions from the first feature
+                    fields = QgsJsonUtils.stringToFields(json.dumps(features[0]))
+
+                    # Create a temporary layer
+                    type_string = f"{geometry_type}?crs={crs.authid()}"
+                    layer_name = f"Custom {geometry_type} Layer"
+                    layer = QgsVectorLayer(type_string.lower(), layer_name, "memory")
+
+                    if layer.isValid():
+                        # Add fields to the layer
+                        data_provider = layer.dataProvider()
+                        data_provider.addAttributes(fields)
+                        layer.updateFields()
+
+                        # Convert GeoJSON features to QgsFeature objects
+                        geojson_features = {
+                            "type": "FeatureCollection",
+                            "features": features
+                        }
+                        qgis_features = QgsJsonUtils.stringToFeatureList(json.dumps(geojson_features), fields)
+
+                        # Add features to the layer
+                        data_provider.addFeatures(qgis_features)
                         layer.setCrs(crs)
+                        layer.updateExtents()
+
                         QgsProject.instance().addMapLayer(layer)
                     else:
-                        QMessageBox.warning(None, 'FinBIF_Plugin', f'Failed to create {feature_type.lower()} layer from fetched data.')
+                        QMessageBox.warning(None, 'FinBIF_Plugin', f'Failed to create {geometry_type.lower()} layer from fetched data.')
 
-            create_layer(point_features, 'Point')
-            create_layer(line_features, 'LineString')
-            create_layer(polygon_features, 'Polygon')
-            create_layer(multipoint_features, 'MultiPoint')
-            create_layer(multiline_features, 'MultiLineString')
-            create_layer(multipolygon_features, 'MultiPolygon')
+            create_layer(point_features, 'Point', crs)
+            create_layer(line_features, 'LineString', crs)
+            create_layer(polygon_features, 'Polygon', crs)
+            create_layer(multipoint_features, 'MultiPoint', crs)
+            create_layer(multiline_features, 'MultiLineString', crs)
+            create_layer(multipolygon_features, 'MultiPolygon', crs)
 
         QMessageBox.information(None, 'FinBIF_Plugin', f'API Query loaded {len(all_features)} records loaded on map.')
 
