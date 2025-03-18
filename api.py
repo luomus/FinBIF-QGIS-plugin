@@ -2,7 +2,12 @@ import requests
 from PyQt5.QtWidgets import QMessageBox, QApplication
 
 def fetch_data(params, progress_bar):
-    base_url = "https://api.laji.fi/v0/warehouse/query/unit/list"
+    if "use_test_api" in params:
+        base_url = "https://apitest.laji.fi/v0/warehouse/query/unit/list"
+        del params["use_test_api"]
+    else:
+        base_url = "https://api.laji.fi/v0/warehouse/query/unit/list"
+
     params["format"] = "geojson"
     params["page"] = 1
     params["pageSize"] = 100

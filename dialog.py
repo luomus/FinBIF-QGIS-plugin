@@ -1,9 +1,10 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, QPushButton, QCheckBox, QTabWidget, QWidget, QLabel, QProgressBar, QSlider, QMessageBox
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, QDialogButtonBox, QPushButton, QCheckBox, QTabWidget, QWidget, QLabel, QProgressBar, QSlider, QMessageBox
 from PyQt5.QtCore import QSettings, Qt
 from .api import fetch_data
 import json
 from qgis.core import QgsProject, QgsVectorLayer, QgsCoordinateReferenceSystem, QgsJsonUtils
 from .custom_widgets import *
+import requests
 
 class FinBIFDialog(QDialog):
     def __init__(self, iface, areas, ranges):
@@ -29,10 +30,23 @@ class FinBIFDialog(QDialog):
         general_layout = QVBoxLayout()
         general_form_layout = QFormLayout()
 
+        # Access Token Input and Get API Key Button on the Same Row
+        access_token_layout = QHBoxLayout()
+        
         self.access_token_input = QLineEdit()
         self.access_token_input.setText(self.settings.value("FinBIF_API_Plugin/access_token", ""))
         self.access_token_input.setToolTip('Your API access token. See more https://api.laji.fi/explorer/#/APIUser')
-        general_form_layout.addRow(QLabel('Access token: (mandatory)'), self.access_token_input)
+        
+        self.get_api_key_button = QPushButton("Get API KEY")
+        self.get_api_key_button.clicked.connect(self.open_api_key_dialog)
+        
+        access_token_layout.addWidget(self.access_token_input)
+        access_token_layout.addWidget(self.get_api_key_button)
+        
+        general_form_layout.addRow(QLabel('Access token: (mandatory)'), access_token_layout)
+        
+        general_layout.addLayout(general_form_layout)
+        general_tab.setLayout(general_layout)
 
         self.crs_combo = QComboBox()
         self.crs_combo.addItems(['EUREF', 'YKJ', 'WGS84',])
@@ -56,10 +70,6 @@ class FinBIFDialog(QDialog):
 
         self.time_input = DateRangeInput()
         general_form_layout.addRow(QLabel('Observation date:'), self.time_input)
-
-        self.wild_card_input = QLineEdit()
-        self.wild_card_input.setToolTip('Pass filters that are not defined in this dialog but can be used in https://api.laji.fi/explorer/#!/Warehouse/get_warehouse_query_unit_list. Use format "parameterName=parameterValue". For example, "annotated=true".')
-        general_form_layout.addRow(QLabel('Other api.laji.fi filters:'), self.wild_card_input)
 
         general_layout.addLayout(general_form_layout)
         general_tab.setLayout(general_layout)
@@ -89,10 +99,6 @@ class FinBIFDialog(QDialog):
         self.invasive_checkbox = QCheckBox()
         self.invasive_checkbox.setToolTip('True for invasive taxa')
         taxon_form_layout.addRow(QLabel('Invasive:'), self.invasive_checkbox)
-
-        self.sensitive_checkbox = QCheckBox()
-        self.sensitive_checkbox.setToolTip('True for sensitive taxa')
-        taxon_form_layout.addRow(QLabel('Sensitive:'), self.sensitive_checkbox)
 
         self.wild_combo = CheckableComboBox()
         self.wild_combo.addItems(['', 'WILD', 'WILD_UNKNOWN', 'NON_WILD'])
@@ -247,6 +253,23 @@ class FinBIFDialog(QDialog):
 
         layout.addWidget(tab_widget)
 
+        # Others Parameters Tab
+        others_tab = QWidget()
+        others_layout = QVBoxLayout()
+        others_form_layout = QFormLayout()
+
+        self.wild_card_input = QLineEdit()
+        self.wild_card_input.setToolTip('Pass filters that are not defined in this dialog but can be used in https://api.laji.fi/explorer/#!/Warehouse/get_warehouse_query_unit_list. Use format "parameterName=parameterValue". For example, "annotated=true".')
+        others_form_layout.addRow(QLabel('Other api.laji.fi filters:'), self.wild_card_input)
+
+        self.use_test_api_checkbox = QCheckBox("Use Test API")
+        others_form_layout.addRow(self.use_test_api_checkbox)
+
+        others_layout.addLayout(others_form_layout)
+        others_tab.setLayout(others_layout)
+
+        tab_widget.addTab(others_tab, "Others")
+
         # Widgets in all tabs
         self.progress_bar = QProgressBar()
         self.progress_bar.setMinimum(0)
@@ -262,6 +285,43 @@ class FinBIFDialog(QDialog):
 
         self.setLayout(layout)
 
+
+    def open_api_key_dialog(self):
+        dialog = QDialog()
+        dialog.setWindowTitle("Get token")
+        layout = QVBoxLayout()
+        
+        email_input = QLineEdit()
+        email_input.setPlaceholderText("Enter your email")
+        layout.addWidget(email_input)
+        
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(lambda: self.request_api_key(email_input.text(), dialog))
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        
+        dialog.setLayout(layout)
+        dialog.exec_()
+    
+    def request_api_key(self, email, dialog):
+        if not email:
+            return 
+        
+        url = "https://api.laji.fi/v0/api-users"
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        data = json.dumps({"email": email})
+        
+        try:
+            response = requests.post(url, headers=headers, data=data)
+            if response.status_code == 200:
+                QMessageBox.information(None, 'FinBIF_Plugin', 'API key request sent. Check your email for further instructions.')
+            else:
+                QMessageBox.warning(None, 'FinBIF_Plugin', f"Error: {response.status_code}, {response.text}")
+        except Exception as e:
+            QMessageBox.warning(None, 'FinBIF_Plugin', f"Error: {e}")
+        
+        dialog.accept()
+
     def reset(self):
         """When user clicks reset values button"""
         self.crs_combo.setCurrentIndex(0)
@@ -275,7 +335,6 @@ class FinBIFDialog(QDialog):
         self.informal_taxon_group_id_not_input.clear()
         self.finnish_checkbox.setChecked(False)
         self.invasive_checkbox.setChecked(False)
-        self.sensitive_checkbox.setChecked(False)
         self.wild_combo.setCurrentIndex(0)
         self.taxon_admin_filters_operator_combo.setCurrentIndex(0)
         self.administrative_status_id_combo.clearSelection()
@@ -294,7 +353,7 @@ class FinBIFDialog(QDialog):
         self.source_of_coordinates_combo.setCurrentIndex(0)
         self.collection_quality_combo.setCurrentIndex(0)
         self.record_quality_combo.setCurrentIndex(0)
-
+        self.use_test_api_checkbox.setChecked(False)
 
 
     def run(self):
@@ -317,7 +376,6 @@ class FinBIFDialog(QDialog):
         informal_taxon_group_id_not = self.informal_taxon_group_id_not_input.text()
         finnish = self.finnish_checkbox.isChecked()
         invasive = self.invasive_checkbox.isChecked()
-        sensitive = self.sensitive_checkbox.isChecked()
         wild = self.wild_combo.currentText()
         taxon_admin_filters_operator = self.taxon_admin_filters_operator_combo.currentText()
         wild_card = self.wild_card_input.text()
@@ -328,6 +386,7 @@ class FinBIFDialog(QDialog):
         collection_quality = self.collection_quality_combo.currentText()
         record_quality = self.record_quality_combo.currentText()
         access_token = self.access_token_input.text()
+        use_test_api = self.use_test_api_checkbox.isChecked()
 
         def map_values(combo_box, mapping_dict):
             """This function maps values if they are not the same in QGIS dialog window and in api.laji.fi"""
@@ -370,8 +429,8 @@ class FinBIFDialog(QDialog):
             params["finnish"] = finnish
         if invasive:
             params["invasive"] = invasive
-        if sensitive:
-            params["sensitive"] = sensitive
+        if use_test_api:
+            params["use_test_api"] = use_test_api
         if wild:
             params["wild"] = wild
         if administrative_status_id:
@@ -423,8 +482,9 @@ class FinBIFDialog(QDialog):
             self.is_running = False
             self.submit_button.setText('Submit')
             return
-
+        
         self.settings.setValue("FinBIF_API_Plugin/access_token", params["access_token"])
+        
 
         #full_url = f"https://api.laji.fi/v0/warehouse/query/unit/list?{'&'.join([f'{k}={v}' for k, v in params.items() if v])}"
         
