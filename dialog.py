@@ -313,12 +313,12 @@ class FinBIFDialog(QDialog):
         
         try:
             response = requests.post(url, headers=headers, data=data)
-            if response.status_code == 200:
+            if response.status_code in [200, 201]:
                 QMessageBox.information(None, 'FinBIF_Plugin', 'API key request sent. Check your email for further instructions.')
             else:
                 QMessageBox.warning(None, 'FinBIF_Plugin', f"Error: {response.status_code}, {response.text}")
         except Exception as e:
-            QMessageBox.warning(None, 'FinBIF_Plugin', f"Error: {e}")
+            QMessageBox.warning(None, 'FinBIF_Plugin', f"Mystery error: {e}. Check your email or try again later?")
         
         dialog.accept()
 
