@@ -1,16 +1,13 @@
 import requests
 from PyQt5.QtWidgets import QMessageBox, QApplication
+import json
 
 def fetch_data(params, progress_bar):
-    if "use_test_api" in params:
-        base_url = "https://apitest.laji.fi/v0/warehouse/query/unit/list"
-        del params["use_test_api"]
-    else:
-        base_url = "https://api.laji.fi/v0/warehouse/query/unit/list"
+    base_url = "https://api.laji.fi/v0/warehouse/query/unit/list"
 
     params["format"] = "geojson"
     params["page"] = 1
-    params["pageSize"] = 100
+    params["pageSize"] = 1000
 
     all_features = []
     last_page = None
@@ -41,3 +38,22 @@ def fetch_data(params, progress_bar):
         QApplication.processEvents()  # Keep UI responsive
 
     return all_features
+
+def request_api_key(email, dialog):
+    if not email:
+        return 
+    
+    url = "https://api.laji.fi/v0/api-users"
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    data = json.dumps({"email": email})
+    
+    try:
+        response = requests.post(url, headers=headers, data=data)
+        if response.status_code in [200, 201]:
+            QMessageBox.information(None, 'FinBIF_Plugin', 'API key request sent. Check your email for further instructions.')
+        else:
+            QMessageBox.warning(None, 'FinBIF_Plugin', f"Error: {response.status_code}, {response.text}")
+    except Exception as e:
+        QMessageBox.warning(None, 'FinBIF_Plugin', f"Mystery error: {e}. Check your email or try again later?")
+    
+    dialog.accept()

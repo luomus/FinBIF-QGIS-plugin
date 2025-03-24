@@ -1,10 +1,10 @@
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, QDialogButtonBox, QPushButton, QCheckBox, QTabWidget, QWidget, QLabel, QProgressBar, QSlider, QMessageBox
 from PyQt5.QtCore import QSettings, Qt
-from .api import fetch_data
-import json
-from qgis.core import QgsProject, QgsVectorLayer, QgsCoordinateReferenceSystem, QgsJsonUtils
+from .api import fetch_data, request_api_key
+from qgis.core import QgsCoordinateReferenceSystem
 from .custom_widgets import *
-import requests
+import requests, os, json
+from .helpers import map_values, process_geometry_collection, create_layer
 
 class FinBIFDialog(QDialog):
     def __init__(self, iface, areas, ranges):
@@ -296,32 +296,13 @@ class FinBIFDialog(QDialog):
         layout.addWidget(email_input)
         
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(lambda: self.request_api_key(email_input.text(), dialog))
+        button_box.accepted.connect(lambda: request_api_key(email_input.text(), dialog))
         button_box.rejected.connect(dialog.reject)
         layout.addWidget(button_box)
         
         dialog.setLayout(layout)
         dialog.exec_()
     
-    def request_api_key(self, email, dialog):
-        if not email:
-            return 
-        
-        url = "https://api.laji.fi/v0/api-users"
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        data = json.dumps({"email": email})
-        
-        try:
-            response = requests.post(url, headers=headers, data=data)
-            if response.status_code in [200, 201]:
-                QMessageBox.information(None, 'FinBIF_Plugin', 'API key request sent. Check your email for further instructions.')
-            else:
-                QMessageBox.warning(None, 'FinBIF_Plugin', f"Error: {response.status_code}, {response.text}")
-        except Exception as e:
-            QMessageBox.warning(None, 'FinBIF_Plugin', f"Mystery error: {e}. Check your email or try again later?")
-        
-        dialog.accept()
-
     def reset(self):
         """When user clicks reset values button"""
         self.crs_combo.setCurrentIndex(0)
@@ -387,11 +368,6 @@ class FinBIFDialog(QDialog):
         record_quality = self.record_quality_combo.currentText()
         access_token = self.access_token_input.text()
         use_test_api = self.use_test_api_checkbox.isChecked()
-
-        def map_values(combo_box, mapping_dict):
-            """This function maps values if they are not the same in QGIS dialog window and in api.laji.fi"""
-            selected_values = combo_box.currentData()
-            return ','.join(filter(None, [mapping_dict.get(value, '') for value in selected_values]))
     
         administrative_status_id = map_values(self.administrative_status_id_combo, self.ranges['MX.adminStatusEnum'])
         red_list_status_id = map_values(self.red_list_status_id_combo, self.ranges['MX.iucnStatuses'])
@@ -469,7 +445,7 @@ class FinBIFDialog(QDialog):
             params["recordQuality"] = record_quality
         if wild_card:
             try:
-                key, value = wild_card.split('=') #make sure extra parameters are valid
+                key, value = wild_card.split('=') # Simple check to make sure extra parameters are valid
             except:
                 QMessageBox.warning(None, 'FinBIF_Plugin', 'Wild card parameter is invalid. Use the format "parameter=value"')
                 self.is_running = False
@@ -483,12 +459,12 @@ class FinBIFDialog(QDialog):
             self.submit_button.setText('Submit')
             return
         
-        self.settings.setValue("FinBIF_API_Plugin/access_token", params["access_token"])
+        self.settings.setValue("FinBIF_API_Plugin/access_token", params["access_token"]) # Set access token to settings as a default value
         
 
         #full_url = f"https://api.laji.fi/v0/warehouse/query/unit/list?{'&'.join([f'{k}={v}' for k, v in params.items() if v])}"
         
-        param_text = "\n".join(f"{key}: {value}" for key, value in params.items())
+        param_text = "\n".join(f"{key}: {value}" for key, value in params.items()) # Add all parameters to a text for user to see
 
         reply = QMessageBox.question(
             None, 
@@ -504,90 +480,49 @@ class FinBIFDialog(QDialog):
             return  # Exit function if No is selected
 
         self.progress_bar.setValue(0)
+
         all_features = fetch_data(params, self.progress_bar)
 
-
         if all_features:
-            geometrycollection_features = [feature for feature in all_features if feature['geometry']['type'] == 'GeometryCollection']
-            point_features = [feature for feature in all_features if feature['geometry']['type'] == 'Point']
-            line_features = [feature for feature in all_features if feature['geometry']['type'] == 'LineString']
-            polygon_features = [feature for feature in all_features if feature['geometry']['type'] == 'Polygon']
-            multipoint_features = [feature for feature in all_features if feature['geometry']['type'] == 'MultiPoint']
-            multiline_features = [feature for feature in all_features if feature['geometry']['type'] == 'MultiLineString']
-            multipolygon_features = [feature for feature in all_features if feature['geometry']['type'] == 'MultiPolygon']
 
-            # Convert GeometryCollections to other types
-            for feature in geometrycollection_features:
-                geometries = feature['geometry']['geometries']
-                for geom in geometries:
-                    new_feature = feature.copy()
-                    new_feature['geometry'] = geom
-                    if geom['type'] == 'Point':
-                        point_features.append(new_feature)
-                    elif geom['type'] == 'LineString':
-                        line_features.append(new_feature)
-                    elif geom['type'] == 'Polygon':
-                        polygon_features.append(new_feature)
-                    elif geom['type'] == 'MultiPoint':
-                        multipoint_features.append(new_feature)
-                    elif geom['type'] == 'MultiLineString':
-                        multiline_features.append(new_feature)
-                    elif geom['type'] == 'MultiPolygon':
-                        multipolygon_features.append(new_feature)
-                    else:
-                        pass
-                        # GeometryCollection has GeometryCollections ??
+            # Convert GeometryCollections to MultiX if possible
+            for idx, feature in enumerate(all_features):
+                geometry = feature['geometry']
+                if geometry['type'] == 'GeometryCollection':
+                    feature['geometry'] = process_geometry_collection(geometry, crs)
+                    all_features[idx] = feature
 
-            if self.crs_combo.currentText() == 'EUREF':
-                crs = QgsCoordinateReferenceSystem('EPSG:3067') 
-            elif self.crs_combo.currentText() == 'YKJ':
-                crs = QgsCoordinateReferenceSystem('EPSG:2393') 
-            elif self.crs_combo.currentText() == 'WGS84':
-                crs = QgsCoordinateReferenceSystem('EPSG:4326') 
+            # Map the CRS to QGIS
+            if crs == 'EUREF':
+                qgis_crs = QgsCoordinateReferenceSystem('EPSG:3067') 
+            elif crs == 'YKJ':
+                qgis_crs = QgsCoordinateReferenceSystem('EPSG:2393') 
+            elif crs == 'WGS84':
+                qgis_crs = QgsCoordinateReferenceSystem('EPSG:4326') 
             else:
-                crs = QgsCoordinateReferenceSystem('EPSG:4326')  # Default to WGS 84
+                qgis_crs = QgsCoordinateReferenceSystem('EPSG:4326')  # Default to WGS 84
 
-            def create_layer(features, geometry_type, crs):
-                """Create a QGIS memory layer from GeoJSON-like features."""
-                if features:
-                    # Determine the field definitions from the first feature
-                    fields = QgsJsonUtils.stringToFields(json.dumps(features[0]))
+            # Separate features by geometry type
+            features_by_type = {
+                'Point': [],
+                'LineString': [],
+                'Polygon': [],
+                'MultiPoint': [],
+                'MultiLineString': [],
+                'MultiPolygon': []
+            }
 
-                    # Create a temporary layer
-                    type_string = f"{geometry_type}?crs={crs.authid()}"
-                    layer_name = f"Custom {geometry_type} Layer"
-                    layer = QgsVectorLayer(type_string.lower(), layer_name, "memory")
+            # Separate features by geometry type
+            for feature in all_features:
+                geom_type = feature['geometry']['type']
+                if geom_type in features_by_type:
+                    features_by_type[geom_type].append(feature)
 
-                    if layer.isValid():
-                        # Add fields to the layer
-                        data_provider = layer.dataProvider()
-                        data_provider.addAttributes(fields)
-                        layer.updateFields()
+            # Create a QGIS layer for each geometry type
+            for geom_type, features in features_by_type.items():
+                create_layer(features, geom_type, qgis_crs)
 
-                        # Convert GeoJSON features to QgsFeature objects
-                        geojson_features = {
-                            "type": "FeatureCollection",
-                            "features": features
-                        }
-                        qgis_features = QgsJsonUtils.stringToFeatureList(json.dumps(geojson_features), fields)
-
-                        # Add features to the layer
-                        data_provider.addFeatures(qgis_features)
-                        layer.setCrs(crs)
-                        layer.updateExtents()
-
-                        QgsProject.instance().addMapLayer(layer)
-                    else:
-                        QMessageBox.warning(None, 'FinBIF_Plugin', f'Failed to create {geometry_type.lower()} layer from fetched data.')
-
-            create_layer(point_features, 'Point', crs)
-            create_layer(line_features, 'LineString', crs)
-            create_layer(polygon_features, 'Polygon', crs)
-            create_layer(multipoint_features, 'MultiPoint', crs)
-            create_layer(multiline_features, 'MultiLineString', crs)
-            create_layer(multipolygon_features, 'MultiPolygon', crs)
-
-        QMessageBox.information(None, 'FinBIF_Plugin', f'API Query loaded {len(all_features)} records loaded on map.')
+        QMessageBox.information(None, 'FinBIF_Plugin', f'API Query loaded {len(all_features)} records to the map')
 
         self.is_running = False
         self.submit_button.setText('Submit')
