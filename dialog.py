@@ -3,7 +3,7 @@ from PyQt5.QtCore import QSettings, Qt
 from .api import fetch_data, request_api_key
 from qgis.core import QgsCoordinateReferenceSystem
 from .custom_widgets import *
-import requests, os, json
+import requests, os, json, re
 from .helpers import map_values, process_geometry_collection, create_layer
 
 class FinBIFDialog(QDialog):
@@ -22,7 +22,7 @@ class FinBIFDialog(QDialog):
         layout = QVBoxLayout()
         tab_widget = QTabWidget()
 
-        intro_label = QLabel("This plugin allows you to fetch data from the FinBIF API and load it into QGIS.")
+        intro_label = QLabel("This plugin allows you to fetch open data from the FinBIF API and load it into QGIS.")
         layout.addWidget(intro_label)
 
         # General Parameters Tab
@@ -51,13 +51,11 @@ class FinBIFDialog(QDialog):
         self.crs_combo = QComboBox()
         self.crs_combo.addItems(['EUREF', 'YKJ', 'WGS84',])
         self.crs_combo.setToolTip('Coordinate Reference System')
-        self.crs_combo.setMaximumWidth(300)
         general_form_layout.addRow(QLabel('CRS:'), self.crs_combo)
 
         self.geom_type_combo = QComboBox()
         self.geom_type_combo.addItems(['CENTER_POINT', 'ENVELOPE', 'ORIGINAL_FEATURE'])
         self.geom_type_combo.setToolTip('Type of geometry to use')
-        self.geom_type_combo.setMaximumWidth(300)
         general_form_layout.addRow(QLabel('Geometry Type:'), self.geom_type_combo)
 
         self.collection_id_input = QLineEdit()
@@ -101,9 +99,8 @@ class FinBIFDialog(QDialog):
         taxon_form_layout.addRow(QLabel('Invasive:'), self.invasive_checkbox)
 
         self.wild_combo = CheckableComboBox()
-        self.wild_combo.addItems(['', 'WILD', 'WILD_UNKNOWN', 'NON_WILD'])
+        self.wild_combo.addItems(['WILD', 'WILD_UNKNOWN', 'NON_WILD'])
         self.wild_combo.setToolTip('Wild status of the taxa. If multiple, this is OR search.')
-        self.wild_combo.setMaximumWidth(300)
         taxon_form_layout.addRow(QLabel('Wild:'), self.wild_combo)
 
         taxon_layout.addLayout(taxon_form_layout)
@@ -116,38 +113,29 @@ class FinBIFDialog(QDialog):
         administrative_form_layout = QFormLayout()
 
         self.administrative_status_id_combo = CheckableComboBox()
-        self.administrative_status_id_combo.addItems([''])
         self.administrative_status_id_combo.addItems(list(self.ranges['MX.adminStatusEnum'].keys()))
         administrative_form_layout.addRow(QLabel('Administrative statuses:'), self.administrative_status_id_combo)
         self.administrative_status_id_combo.setToolTip('Select administrative status. If multiple, this is OR search.')
-        self.administrative_status_id_combo.setMaximumWidth(300)
 
         self.red_list_status_id_combo = CheckableComboBox()
-        self.red_list_status_id_combo.addItems([''])
         self.red_list_status_id_combo.addItems(list(self.ranges['MX.iucnStatuses'].keys()))
         administrative_form_layout.addRow(QLabel('Red list statuses:'), self.red_list_status_id_combo)
         self.red_list_status_id_combo.setToolTip('Select red list status. If multiple, this is OR search.')
-        self.red_list_status_id_combo.setMaximumWidth(300)
 
         self.taxon_admin_filters_operator_combo = QComboBox()
         self.taxon_admin_filters_operator_combo.addItems(['OR', 'AND'])
         self.taxon_admin_filters_operator_combo.setToolTip('Operator for taxon admin filters. If multiple, this is OR search.')
         administrative_form_layout.addRow(QLabel('Taxon Admin Filters Operator:'), self.taxon_admin_filters_operator_combo)
-        self.taxon_admin_filters_operator_combo.setMaximumWidth(300)
 
         self.atlas_code_combo = CheckableComboBox()
-        self.atlas_code_combo.setMaximumWidth(300)
-        self.atlas_code_combo.addItems([''])
         self.atlas_code_combo.addItems(list(self.ranges['MY.atlasCodeEnum'].keys()))
         administrative_form_layout.addRow(QLabel('Atlas codes'), self.atlas_code_combo)
         self.atlas_code_combo.setToolTip('Select atlas code. If multiple, this is OR search.')
 
         self.atlas_class_combo = CheckableComboBox()
-        self.atlas_class_combo.addItems([''])
         self.atlas_class_combo.addItems(list(self.ranges['MY.atlasClassEnum'].keys()))
         administrative_form_layout.addRow(QLabel('Atlas classes:'), self.atlas_class_combo)
         self.atlas_class_combo.setToolTip('Select atlas class. If multiple, this is OR search.')
-        self.atlas_class_combo.setMaximumWidth(300)
 
         administrative_layout.addLayout(administrative_form_layout)
         administrative_tab.setLayout(administrative_layout)
@@ -159,46 +147,34 @@ class FinBIFDialog(QDialog):
         geographical_form_layout = QFormLayout()
 
         self.country_id_combo = CheckableComboBox()
-        self.country_id_combo.addItems([''])
         self.country_id_combo.addItems(sorted(list(self.areas['countries'].keys())))
         geographical_form_layout.addRow(QLabel('Country:'), self.country_id_combo)
         self.country_id_combo.setToolTip('Select country name')
-        self.country_id_combo.setMaximumWidth(300)
 
         self.finnish_municipality_id_combo = CheckableComboBox()
-        self.finnish_municipality_id_combo.addItems([''])
         self.finnish_municipality_id_combo.addItems(sorted(list(self.areas['municipalities'].keys())))
         self.finnish_municipality_id_combo.setToolTip('Name of the Finnish municipality')
         geographical_form_layout.addRow(QLabel('Finnish Municipality:'), self.finnish_municipality_id_combo)
-        self.finnish_municipality_id_combo.setMaximumWidth(300)
 
         self.biogeographical_province_id_combo = CheckableComboBox()
-        self.biogeographical_province_id_combo.addItems([''])
         self.biogeographical_province_id_combo.addItems(sorted(list(self.areas['biogeographical_areas'].keys())))
         self.biogeographical_province_id_combo.setToolTip('Name of the biogeographical province')
         geographical_form_layout.addRow(QLabel('Biogeographical Province:'), self.biogeographical_province_id_combo)
-        self.biogeographical_province_id_combo.setMaximumWidth(300)
 
         self.ely_centre_id_combo = CheckableComboBox()
-        self.ely_centre_id_combo.addItems([''])
         self.ely_centre_id_combo.addItems(sorted(list(self.areas['ely_centers'].keys())))
         self.ely_centre_id_combo.setToolTip('Name of the ELY centre')
         geographical_form_layout.addRow(QLabel('ELY Centre area:'), self.ely_centre_id_combo)
-        self.ely_centre_id_combo.setMaximumWidth(300)
 
         self.province_id_combo = CheckableComboBox()
-        self.province_id_combo.addItems([''])
         self.province_id_combo.addItems(sorted(list(self.areas['provinces'].keys())))
         self.province_id_combo.setToolTip('Finnish province')
         geographical_form_layout.addRow(QLabel('Province:'), self.province_id_combo)
-        self.province_id_combo.setMaximumWidth(300)
 
         self.bird_association_area_id_combo = CheckableComboBox()
-        self.bird_association_area_id_combo.addItems([''])
         self.bird_association_area_id_combo.addItems(sorted(list(self.areas['bird_association_areas'].keys())))
         self.bird_association_area_id_combo.setToolTip('Name of the bird association area')
         geographical_form_layout.addRow(QLabel('Bird Association Area:'), self.bird_association_area_id_combo)
-        self.bird_association_area_id_combo.setMaximumWidth(300)
 
         self.area_input = QLineEdit()
         self.area_input.setToolTip("""Filter using name of country, municipality, province or locality. Multiple values are seperated by ','.""")
@@ -221,10 +197,9 @@ class FinBIFDialog(QDialog):
         geographical_form_layout.addRow(self.coordinate_accuracy_label)
 
         self.source_of_coordinates_combo = CheckableComboBox()
-        self.source_of_coordinates_combo.addItems(['', 'COORDINATES', 'COORDINATES_CENTERPOINT', 'REPORTED_VALUE', 'FINNISH_MUNICIPALITY', 'FINNISH_OLD_MUNICIPALITY'])
+        self.source_of_coordinates_combo.addItems(['COORDINATES', 'COORDINATES_CENTERPOINT', 'REPORTED_VALUE', 'FINNISH_MUNICIPALITY', 'FINNISH_OLD_MUNICIPALITY'])
         self.source_of_coordinates_combo.setToolTip('Filter based on source of the coordinates')
         geographical_form_layout.addRow(QLabel('Source of Coordinates:'), self.source_of_coordinates_combo)
-        self.source_of_coordinates_combo.setMaximumWidth(300)
 
         geographical_layout.addLayout(geographical_form_layout)
         geographical_tab.setLayout(geographical_layout)
@@ -236,16 +211,14 @@ class FinBIFDialog(QDialog):
         quality_form_layout = QFormLayout()
 
         self.collection_quality_combo = CheckableComboBox()
-        self.collection_quality_combo.addItems(['', 'PROFESSIONAL', 'HOBBYIST', 'AMATEUR'])
+        self.collection_quality_combo.addItems(['PROFESSIONAL', 'HOBBYIST', 'AMATEUR'])
         self.collection_quality_combo.setToolTip('Filter based on quality rating of collections.')
         quality_form_layout.addRow(QLabel('Collection Quality:'), self.collection_quality_combo)
-        self.collection_quality_combo.setMaximumWidth(300)
 
         self.record_quality_combo = CheckableComboBox()
-        self.record_quality_combo.addItems(['', 'EXPERT_VERIFIED', 'COMMUNITY_VERIFIED', 'NEUTRAL', 'UNCERTAIN', 'ERRONEOUS'])
+        self.record_quality_combo.addItems(['EXPERT_VERIFIED', 'COMMUNITY_VERIFIED', 'NEUTRAL', 'UNCERTAIN', 'ERRONEOUS'])
         self.record_quality_combo.setToolTip('Filter using quality rating of the occurrence')
         quality_form_layout.addRow(QLabel('Record Quality:'), self.record_quality_combo)
-        self.record_quality_combo.setMaximumWidth(300)
 
         quality_layout.addLayout(quality_form_layout)
         quality_tab.setLayout(quality_layout)
@@ -290,13 +263,21 @@ class FinBIFDialog(QDialog):
         dialog = QDialog()
         dialog.setWindowTitle("Get token")
         layout = QVBoxLayout()
-        
+
         email_input = QLineEdit()
         email_input.setPlaceholderText("Enter your email")
         layout.addWidget(email_input)
         
+        def on_accept():
+            email = email_input.text().strip()
+            if not re.match(r"[^@]+@[^@]+\.[^@]+", email): # Check if email is valid
+                QMessageBox.warning(dialog, "Invalid Email", "Please enter a valid email address.")
+                return
+            request_api_key(email, dialog) # sends the email to the API
+            dialog.accept()
+
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(lambda: request_api_key(email_input.text(), dialog))
+        button_box.accepted.connect(on_accept)
         button_box.rejected.connect(dialog.reject)
         layout.addWidget(button_box)
         

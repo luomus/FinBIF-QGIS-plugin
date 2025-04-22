@@ -2,7 +2,7 @@
 
 ## Overview
 
-The FinBIF API Plugin for QGIS allows users to fetch data from the FinBIF API and load it directly into QGIS. This plugin provides a user-friendly interface to query the FinBIF API and visualize the data on a map.
+The FinBIF API Plugin for QGIS allows users to fetch data from the FinBIF API and load it directly into QGIS. This plugin provides a user-friendly interface to query the FinBIF API and visualize the data on a map. *Note*: this is only for open data so part of it might be coarsened. For restricted data, make a [data request](https://info.laji.fi/etusivu/aineistopyynnot/) or visit [public authorities portal](https://viranomaiset.laji.fi/).
 
 ## Features
 

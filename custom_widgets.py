@@ -88,7 +88,10 @@ class CheckableComboBox(QComboBox):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Make the combo editable to set a custom text, but readonly
+        # Set default width
+        self.addItems([''])
+        self.setMinimumWidth(200)
+        self.setBaseSize(300,20)
         self.setEditable(True)
         self.lineEdit().setReadOnly(True)
         # Make the lineedit the same color as QPushButton
@@ -110,8 +113,6 @@ class CheckableComboBox(QComboBox):
         self.view().viewport().installEventFilter(self)
 
     def resizeEvent(self, event):
-        # Recompute text to elide as needed
-        self.updateText()
         super().resizeEvent(event)
 
     def eventFilter(self, object, event):
