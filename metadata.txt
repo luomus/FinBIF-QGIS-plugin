@@ -1,9 +1,17 @@
 [general]
 name=FinBIF_API_Plugin
 qgisMinimumVersion=3.0
-description=This plugin helps you to get data from api.laji.fi directly to your QGIS.
-about=This plugin allows users to fetch occurrence data from the FinBIF API and load it directly into QGIS. It provides a user-friendly interface to query the FinBIF API and visualize the data on a map.
-version=1.0
+description=This plugin helps you to get data from FinBIF API directly to your QGIS.
+about=This plugin allows users to fetch openly available occurrence data from the FinBIF API (api.laji.fi) and load it directly into QGIS. It provides a user-friendly interface to query the FinBIF API and get the data on a map.
+version=1.2
+changelog=
+    1.1 - Fixed bugs, sertificates and adjusted combobox widths
+    1.0 - Plugin published and all features implemented
+    0.9 - 'Get API KEY' button implemented
+    0.8 - First testing release
 author=Alpo Turunen
 email=alpo.turunen@helsinki.fi
-repository=URL to the code repository
+experimental=False
+repository=https://github.com/luomus/FinBIF-QGIS-plugin
+tracker=https://github.com/luomus/FinBIF-QGIS-plugin
+category=Web
