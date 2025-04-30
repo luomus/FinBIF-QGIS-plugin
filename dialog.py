@@ -238,6 +238,20 @@ class FinBIFDialog(QDialog):
         self.use_test_api_checkbox = QCheckBox("Use Test API")
         others_form_layout.addRow(self.use_test_api_checkbox)
 
+        restricted_label = QLabel(
+            '<p>Do you need sensitive and not-coarsened data? '
+            '<a href="https://info.laji.fi/etusivu/aineistopyynnot/" style="color:blue; text-decoration:none;">Make a data request</a>.</p>'
+        )
+        restricted_label.setOpenExternalLinks(True)
+        others_form_layout.addWidget(restricted_label)
+
+        feedback_label = QLabel(
+            '<p>Do you have feedback or questions? Please send an email to '
+            '<a href="mailto:alpo.turunen@helsinki.fi" style="color:blue; text-decoration:none;">helpdesk@laji.fi</a>.</p>'
+        )
+        feedback_label.setOpenExternalLinks(True)
+        others_form_layout.addWidget(feedback_label)
+
         others_layout.addLayout(others_form_layout)
         others_tab.setLayout(others_layout)
 
