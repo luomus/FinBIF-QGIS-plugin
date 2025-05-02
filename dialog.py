@@ -3,7 +3,7 @@ from PyQt5.QtCore import QSettings, Qt
 from .api import fetch_data, request_api_key
 from qgis.core import QgsCoordinateReferenceSystem
 from .custom_widgets import *
-import requests, os, json, re
+import re
 from .helpers import map_values, process_geometry_collection, create_layer
 
 class FinBIFDialog(QDialog):
@@ -236,6 +236,7 @@ class FinBIFDialog(QDialog):
         others_form_layout.addRow(QLabel('Other api.laji.fi filters:'), self.wild_card_input)
 
         self.use_test_api_checkbox = QCheckBox("Use Test API")
+        self.use_test_api_checkbox.setToolTip('For testing purposes only. Remember to change your API KEY.')
         others_form_layout.addRow(self.use_test_api_checkbox)
 
         restricted_label = QLabel(

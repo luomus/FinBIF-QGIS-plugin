@@ -15,3 +15,4 @@ experimental=False
 repository=https://github.com/luomus/FinBIF-QGIS-plugin
 tracker=https://github.com/luomus/FinBIF-QGIS-plugin
 category=Web
+homepage=https://info.laji.fi/en/frontpage/spatial-data/spatial-data-services/qgis-plugin-for-finbif-api/
