@@ -79,8 +79,8 @@ class FinBIFDialog(QDialog):
         taxon_form_layout = QFormLayout()
 
         self.taxon_id_input = QLineEdit()
-        self.taxon_id_input.setToolTip("""ID of the taxon. E.g. MX.36308. Multiple values are seperated by ','.""")
-        taxon_form_layout.addRow(QLabel('Taxon ID (target):'), self.taxon_id_input)
+        self.taxon_id_input.setToolTip("""ID or the name of the taxon. E.g. MX.36308, parus major or talitiainen. Multiple values are seperated by ','.""")
+        taxon_form_layout.addRow(QLabel('Taxon ID or name:'), self.taxon_id_input)
 
         self.informal_taxon_group_id_input = QLineEdit()
         self.informal_taxon_group_id_input.setToolTip("""ID of the informal taxon group. E.g. MX.37580. Multiple values are seperated by ','.""")
