@@ -1,10 +1,10 @@
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, QDialogButtonBox, QPushButton, QCheckBox, QTabWidget, QWidget, QLabel, QProgressBar, QSlider, QMessageBox
 from PyQt5.QtCore import QSettings, Qt
-from .api import fetch_data, request_api_key
+from .api import *
 from qgis.core import QgsCoordinateReferenceSystem
 from .custom_widgets import *
 import re
-from .helpers import map_values, process_geometry_collection, create_layer
+from .helpers import *
 
 class FinBIFDialog(QDialog):
     def __init__(self, iface, areas, ranges):
@@ -273,7 +273,6 @@ class FinBIFDialog(QDialog):
 
         self.setLayout(layout)
 
-
     def open_api_key_dialog(self):
         dialog = QDialog()
         dialog.setWindowTitle("Get token")
@@ -332,7 +331,6 @@ class FinBIFDialog(QDialog):
         self.record_quality_combo.setCurrentIndex(0)
         self.use_test_api_checkbox.setChecked(False)
 
-
     def run(self):
         """When user clicks submit button"""
         if self.is_running:
@@ -378,11 +376,8 @@ class FinBIFDialog(QDialog):
     
         params = {
             "crs": crs,
-            "format": "geojson",
             "featureType": geom_type,
-            "access_token": access_token,
-            "page": 1,
-            "pageSize": 10000
+            "access_token": access_token
         }
 
         if collection_id:
@@ -458,14 +453,16 @@ class FinBIFDialog(QDialog):
         self.settings.setValue("FinBIF_API_Plugin/access_token", params["access_token"]) # Set access token to settings as a default value
         
 
-        #full_url = f"https://api.laji.fi/v0/warehouse/query/unit/list?{'&'.join([f'{k}={v}' for k, v in params.items() if v])}"
-        
+        full_url = f"https://api.laji.fi/v0/warehouse/query/unit/list?{'&'.join([f'{k}={v}' for k, v in params.items() if v])}"
+        total_obs = get_total_obs(full_url)
+
+
         param_text = "\n".join(f"{key}: {value}" for key, value in params.items()) # Add all parameters to a text for user to see
 
         reply = QMessageBox.question(
             None, 
             'FinBIF_Plugin', 
-            f'Fetching data with the following parameters:\n\n{param_text}\n\nDo you want to continue?',
+            f'Fetching {total_obs} occurrences with the following parameters:\n\n{param_text}\n\nDo you want to continue?',
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No  # Default option
         )
@@ -480,6 +477,8 @@ class FinBIFDialog(QDialog):
         all_features = fetch_data(params, self.progress_bar)
 
         if all_features:
+
+            all_features = combine_similar_columns(all_features)
 
             # Convert GeometryCollections to MultiX if possible
             for idx, feature in enumerate(all_features):

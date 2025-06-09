@@ -12,7 +12,10 @@ def fetch_data(params, progress_bar):
     
     params["format"] = "geojson"
     params["page"] = 1
-    params["pageSize"] = 1000
+    params["pageSize"] = 10000
+    params["selected"] = "document.linkings.collectionQuality,document.loadDate,unit.linkings.taxon.threatenedStatus,unit.linkings.originalTaxon.administrativeStatuses,unit.linkings.taxon.taxonomicOrder,unit.linkings.originalTaxon.latestRedListStatusFinland.status,gathering.displayDateTime,gathering.interpretations.biogeographicalProvinceDisplayname,gathering.interpretations.coordinateAccuracy,unit.abundanceUnit,unit.atlasCode,unit.atlasClass,gathering.locality,unit.unitId,unit.linkings.taxon.scientificName,unit.interpretations.individualCount,unit.interpretations.recordQuality,unit.abundanceString,gathering.eventDate.begin,gathering.eventDate.end,gathering.gatheringId,document.collectionId,unit.det,unit.lifeStage,unit.linkings.taxon.id,unit.notes,unit.sex,document.documentId,document.notes,document.secureReasons,gathering.notes,gathering.team,unit.keywords,unit.linkings.taxon.nameSwedish,unit.linkings.taxon.nameEnglish,document.dataSource"
+
+
 
     all_features = []
     last_page = None
@@ -131,3 +134,20 @@ def renew_api_key(email: str, dialog):
         QMessageBox.information(None, 'FinBIF_Plugin', 'Please check your email to find the current API KEY or contact helpdesk@laji.fi.')
 
     dialog.accept()
+
+def get_total_obs(url):
+    """
+    Get the last page number from the API response with retry logic.
+
+    Parameters:
+    url (str): The URL of the Warehouse API endpoint.
+
+    Returns:
+    int: Total numbers of occurrences from the API.
+    """
+    url = url.replace('/list/', '/count/').replace('&geoJSON=true&featureType=ORIGINAL_FEATURE', '')
+    api_response = requests.get(url).json()
+    if api_response:
+        return api_response.get('total')
+    else:
+        return None

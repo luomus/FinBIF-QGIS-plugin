@@ -1,8 +1,25 @@
 import json
 from shapely.geometry import shape, mapping, MultiPolygon, MultiLineString, MultiPoint, Polygon, LineString, Point
 from pyproj import Transformer
-from qgis.core import QgsJsonUtils, QgsVectorLayer, QgsProject
+from qgis.core import QgsJsonUtils, QgsVectorLayer, QgsProject, QgsFields, QgsField
 from PyQt5.QtWidgets import QMessageBox
+from qgis.PyQt.QtCore import QVariant
+import re
+
+FIELD_TYPE_MAP = {
+    "gathering.eventDate.end": QVariant.Date,
+    "gathering.eventDate.begin": QVariant.Date,
+    "unit.linkings.originalTaxon.taxonomicOrder": QVariant.Int,
+    "unit.linkings.taxon.taxonomicOrder": QVariant.Int,
+    "gathering.interpretations.coordinateAccuracy": QVariant.Int,
+    "unit.linkings.originalTaxon.occurrenceCountFinland": QVariant.Int,
+    "unit.linkings.originalTaxon.sensitive": QVariant.Bool,
+    "document.loadDate": QVariant.Date,
+    "unit.linkings.originalTaxon.finnish": QVariant.Bool,
+    "unit.linkings.originalTaxon.latestRedListStatusFinland.year": QVariant.Int,
+    "unit.linkings.originalTaxon.cursiveName": QVariant.Bool,
+    "unit.interpretations.individualCount": QVariant.Int
+}
 
 def process_geometry_collection(geometry, crs):
     """Convert GeometryCollection to MultiX if only one type exists, or MultiPolygon otherwise (buffering lines/points)."""
@@ -49,11 +66,45 @@ def map_values(combo_box, mapping_dict):
     selected_values = combo_box.currentData()
     return ','.join(filter(None, [mapping_dict.get(value, '') for value in selected_values]))
 
+def collect_all_field_names(features):
+    keys = set()
+    for f in features:
+        keys.update(f.get("properties", {}).keys())
+    return keys  # consistent order
+
+def combine_similar_columns(features):
+    """
+    Finds similar columns (e.g. keyword[0], keyword[1], keyword[2]) and combines them
+    """
+    pattern = re.compile(r'^(.*)\[(\d+)\]$')
+    for feature in features:
+        props = feature.get("properties", {})
+        # Find all base names with [n] pattern
+        columns_dict = {}
+        for key in list(props.keys()):
+            match = pattern.match(key)
+            if match:
+                base_name = match.group(1)
+                columns_dict.setdefault(base_name, []).append(key)
+        # Combine values for each base name
+        for base_name, keys in columns_dict.items():
+            combined = ', '.join(str(props[k]) for k in keys if props[k] not in [None, '', 'nan'])
+            props[base_name] = combined
+            for k in keys:
+                props.pop(k, None)
+        feature["properties"] = props
+    return features
+
 def create_layer(features, geometry_type, qgis_crs):
     """Create a QGIS memory layer from GeoJSON-like features."""
     if features:
         # Determine the field definitions from the first feature
-        fields = QgsJsonUtils.stringToFields(json.dumps(features[0]))
+        field_names = collect_all_field_names(features)
+
+        fields = QgsFields()
+        for name in field_names:
+            qvariant_type = FIELD_TYPE_MAP.get(name, QVariant.String)
+            fields.append(QgsField(name, qvariant_type))
 
         # Create a temporary layer
         type_string = f"{geometry_type}?crs={qgis_crs.authid()}"
@@ -66,10 +117,20 @@ def create_layer(features, geometry_type, qgis_crs):
             data_provider.addAttributes(fields)
             layer.updateFields()
 
+            ordered_features = []
+            for f in features:
+                ordered_props = {key: f["properties"].get(key, "") for key in field_names}
+                ordered_feature = {
+                    "type": "Feature",
+                    "geometry": f["geometry"],
+                    "properties": ordered_props
+                }
+                ordered_features.append(ordered_feature)
+
             # Convert GeoJSON features to QgsFeature objects
             geojson_features = {
                 "type": "FeatureCollection",
-                "features": features
+                "features": ordered_features
             }
             qgis_features = QgsJsonUtils.stringToFeatureList(json.dumps(geojson_features), fields)
 
