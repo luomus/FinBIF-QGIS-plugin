@@ -1,5 +1,6 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, QDialogButtonBox, QPushButton, QCheckBox, QTabWidget, QWidget, QLabel, QProgressBar, QSlider, QMessageBox
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, QPushButton, QCheckBox, QTabWidget, QWidget, QLabel, QProgressBar, QSlider, QMessageBox
 from PyQt5.QtCore import QSettings, Qt
+import pandas as pd
 from ..api import *
 from qgis.core import QgsCoordinateReferenceSystem
 from .custom_widgets import *
@@ -8,12 +9,21 @@ from ..validators import *
 from ..create_layer import create_layer
 from .api_key_dialog import open_api_key_dialog
 
+# Constants
+MAX_OBSERVATIONS_LIMIT = 500000
+CRS_MAPPINGS = {
+    'EUREF': 'EPSG:3067',
+    'YKJ': 'EPSG:2393',
+    'WGS84': 'EPSG:4326'
+}
+
 class FinBIFDialog(QDialog):
-    def __init__(self, iface, areas, ranges):
+    def __init__(self, iface, areas, ranges, collection_names):
         super().__init__()
         self.iface = iface
         self.areas = areas
         self.ranges = ranges
+        self.collection_names = collection_names #TODO: translate collection names later
         self.settings = QSettings()
         self.is_running = False
         self.init_ui()
@@ -51,7 +61,7 @@ class FinBIFDialog(QDialog):
         general_tab.setLayout(general_layout)
 
         self.crs_combo = QComboBox()
-        self.crs_combo.addItems(['EUREF', 'YKJ', 'WGS84',])
+        self.crs_combo.addItems(['ETRS-TM35FIN', 'YKJ', 'WGS84',])
         self.crs_combo.setToolTip('Coordinate Reference System')
         general_form_layout.addRow(QLabel('CRS:'), self.crs_combo)
 
@@ -353,7 +363,7 @@ class FinBIFDialog(QDialog):
         bird_association_area_id = map_values(self.bird_association_area_id_combo, self.areas['bird_association_areas'])
     
         params = {
-            "crs": crs,
+            "crs": crs if crs != 'ETRS-TM35FIN' else 'EUREF',
             "featureType": geom_type,
             "access_token": access_token
         }
@@ -430,13 +440,27 @@ class FinBIFDialog(QDialog):
 
         param_text = "\n".join(f"{key}: {value}" for key, value in params.items()) # Add all parameters to a text for user to see
 
-        reply = QMessageBox.question(
+        if total_obs and total_obs > MAX_OBSERVATIONS_LIMIT:
+            QMessageBox.warning(
+                None, 
+                'FinBIF_Plugin', 
+                f'Error: You are trying to fetch {total_obs:,} occurrences, which exceeds '
+                f'the maximum limit of {MAX_OBSERVATIONS_LIMIT:,} records.\n\n'
+                f'Please refine your search parameters to reduce the number of results.\n\n'
+                f'Parameters:\n{param_text}',
+                QMessageBox.Ok
+            )
+            self.is_running = False
+            self.submit_button.setText('Submit')
+            return
+        else:
+            reply = QMessageBox.question(
             None, 
             'FinBIF_Plugin', 
             f'Fetching {total_obs} occurrences with the following parameters:\n\n{param_text}\n\nDo you want to continue?',
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No  # Default option
-        )
+            )
 
         if reply == QMessageBox.No:
             self.is_running = False
@@ -445,50 +469,59 @@ class FinBIFDialog(QDialog):
 
         self.progress_bar.setValue(0)
 
-        all_features = fetch_data(params, self.progress_bar)
+        # Process data in batches to avoid memory issues
+        total_features = 0
+        
+        # Map the CRS to QGIS using constants
+        epsg_string = CRS_MAPPINGS.get(params["crs"])
+        qgis_crs = QgsCoordinateReferenceSystem(epsg_string)
 
-        if all_features:
+        # Collect GeoDataFrames by geometry type
+        gdfs_by_type = {
+            'Point': [],
+            'LineString': [],  
+            'Polygon': [],
+            'MultiPoint': [],
+            'MultiLineString': [],
+            'MultiPolygon': []
+        }
 
-            all_features = combine_similar_columns(all_features)
+        for gdf in fetch_data(params, self.progress_bar, epsg_string):
+            if gdf is not None and not gdf.empty:
 
-            # Convert GeometryCollections to MultiX if possible
-            for idx, feature in enumerate(all_features):
-                geometry = feature['geometry']
-                if geometry['type'] == 'GeometryCollection':
-                    feature['geometry'] = process_geometry_collection(geometry, crs)
-                    all_features[idx] = feature
+                gdf = combine_similar_columns(gdf)
+                gdf = convert_geometry_collection_to_multipolygon(gdf)
+                gdf = validate_geometry(gdf)
+                
+                # Group by geometry type and collect GeoDataFrames
+                if not gdf.empty:
+                    # Update total features count
+                    total_features += len(gdf)
+                    
+                    geom_types = gdf.geometry.geom_type.unique()
+                    for geom_type in geom_types:
+                        subset_gdf = gdf[gdf.geometry.geom_type == geom_type]
+                        if geom_type not in gdfs_by_type:
+                            gdfs_by_type[geom_type] = []
+                            QgsMessageLog.logMessage(f"Warning: Encountered unexpected geometry type '{geom_type}'", "FinBIF Plugin", Qgis.Warning)
+                        if not subset_gdf.empty:
+                            gdfs_by_type[geom_type].append(subset_gdf)
+                
+                QApplication.processEvents()
 
-            # Map the CRS to QGIS
-            if crs == 'EUREF':
-                qgis_crs = QgsCoordinateReferenceSystem('EPSG:3067') 
-            elif crs == 'YKJ':
-                qgis_crs = QgsCoordinateReferenceSystem('EPSG:2393') 
-            elif crs == 'WGS84':
-                qgis_crs = QgsCoordinateReferenceSystem('EPSG:4326') 
-            else:
-                qgis_crs = QgsCoordinateReferenceSystem('EPSG:4326')  # Default to WGS 84
+        if total_features > 0:
+            # Create one layer per geometry type from collected GeoDataFrames
+            for geom_type, gdf_list in gdfs_by_type.items():
+                if gdf_list:  # Only create layer if we have data for this geometry type
+                    # Concatenate all GeoDataFrames of this geometry type
+                    combined_gdf = pd.concat(gdf_list, ignore_index=True)
+                    if not combined_gdf.empty:
+                        layer_name = f"FinBIF_{geom_type}_Occurrences"
+                        create_layer(combined_gdf, layer_name, qgis_crs)
 
-            # Separate features by geometry type
-            features_by_type = {
-                'Point': [],
-                'LineString': [],
-                'Polygon': [],
-                'MultiPoint': [],
-                'MultiLineString': [],
-                'MultiPolygon': []
-            }
-
-            # Separate features by geometry type
-            for feature in all_features:
-                geom_type = feature['geometry']['type']
-                if geom_type in features_by_type:
-                    features_by_type[geom_type].append(feature)
-
-            # Create a QGIS layer for each geometry type
-            for geom_type, features in features_by_type.items():
-                create_layer(features, geom_type, qgis_crs)
-
-        QMessageBox.information(None, 'FinBIF_Plugin', f'API Query loaded {len(all_features)} records to the map')
+            QMessageBox.information(None, 'FinBIF_Plugin', f'API Query loaded {total_features} records to the map successfully.')
+        else:
+            QMessageBox.information(None, 'FinBIF_Plugin', 'No data was retrieved from the API')
 
         self.is_running = False
         self.submit_button.setText('Submit')

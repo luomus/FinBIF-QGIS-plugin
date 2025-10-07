@@ -1,59 +1,120 @@
 import requests
 from PyQt5.QtWidgets import QMessageBox, QApplication
 import json, certifi
+from functools import lru_cache
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from qgis.core import QgsMessageLog, Qgis
+from PyQt5.QtWidgets import QMessageBox, QApplication
+import os
+import geopandas as gpd
+
+PRODUCTION_API_BASE = "https://api.laji.fi/v0/"
+TEST_API_BASE = "https://apitest.laji.fi/v0/"
+REQUEST_TIMEOUT = 60  # seconds
 
 def get_api_base_url(params):
     """Determine the API base URL based on the test API parameter."""
     if 'use_test_api' in params:
         params = params.pop('use_test_api')
-        return "https://apitest.laji.fi/v0/", params
+        return TEST_API_BASE, params
     else:
-        return "https://api.laji.fi/v0/", params 
+        return PRODUCTION_API_BASE, params
 
-def fetch_data(params, progress_bar):
+@lru_cache(maxsize=1)
+def load_collection_names(lang='en'):
+    """
+    Load collection names from the FinBIF API.
+    
+    Returns:
+    dict: Dictionary mapping collection IDs to collection names, or empty dict if request fails
+    """
+    url = f"http://laji.fi/api/collections?pageSize=1500&lang={lang}"
+
+    response = requests.get(url)
+    if response and response.status_code in [200, 201]:
+        data = response.json()
+        if data:
+            return {item['id']: item['longName'] for item in data['results']}
+    
+    if response:
+        QgsMessageLog.logMessage(f"Warning: Failed to load collection names: {response.status_code}", "FinBIF Plugin", Qgis.Warning)
+    
+    return {}
+
+def _handle_request_error(error, context="API request"):
+    """Handle common request errors with appropriate user messages."""
+    QgsMessageLog.logMessage(f"Error during {context}: {error}", "FinBIF Plugin", Qgis.Critical)
+    
+    error_messages = {
+        requests.exceptions.Timeout: f'Request timed out after {REQUEST_TIMEOUT} seconds. Please try again.',
+        requests.exceptions.ConnectionError: 'Unable to connect to the FinBIF API. Check your internet connection.',
+        requests.exceptions.HTTPError: f'Server error: {error}. Please try again later.',
+        requests.exceptions.RequestException: f'Network error: {error}'
+    }
+    
+    message = error_messages.get(type(error), f'Unexpected error: {error}')
+    QMessageBox.warning(None, 'FinBIF_Plugin', message)
+
+def fetch_data(params, progress_bar, epsg_string):
+    """
+    Fetch data from FinBIF API and return as GeoDataFrame.
+    
+    Parameters:
+    params (dict): API parameters
+    progress_bar: Progress bar widget to update
+    
+    Yields:
+    gpd.GeoDataFrame: GeoDataFrame for each page of results
+    """
     api_base_url, params = get_api_base_url(params)
     full_url = api_base_url + "warehouse/query/unit/list"
-        
-    params["format"] = "geojson"
-    params["page"] = 1
-    params["pageSize"] = 10000
-    params["selected"] = "document.linkings.collectionQuality,document.loadDate,unit.linkings.taxon.threatenedStatus,unit.linkings.originalTaxon.administrativeStatuses,unit.linkings.taxon.taxonomicOrder,unit.linkings.originalTaxon.latestRedListStatusFinland.status,gathering.displayDateTime,gathering.interpretations.biogeographicalProvinceDisplayname,gathering.interpretations.coordinateAccuracy,unit.abundanceUnit,unit.atlasCode,unit.atlasClass,gathering.locality,unit.unitId,unit.linkings.taxon.scientificName,unit.interpretations.individualCount,unit.interpretations.recordQuality,unit.abundanceString,gathering.eventDate.begin,gathering.eventDate.end,gathering.gatheringId,document.collectionId,unit.det,unit.lifeStage,unit.linkings.taxon.id,unit.notes,unit.sex,document.documentId,document.notes,document.secureReasons,gathering.notes,gathering.team,unit.keywords,unit.linkings.taxon.nameSwedish,unit.linkings.taxon.nameEnglish,document.dataSource"
-
-    all_features = []
-    last_page = None
-
-    while True:
-        try:
-            response = requests.get(full_url, params=params)
-            if response.status_code in [200, 201]:
+    
+    # Set required parameters
+    params.update({
+        "format": "geojson",
+        "page": 1,
+        "pageSize": 10000,
+        "selected": "document.linkings.collectionQuality,document.loadDate,unit.linkings.taxon.threatenedStatus,unit.linkings.originalTaxon.administrativeStatuses,unit.linkings.taxon.taxonomicOrder,unit.linkings.originalTaxon.latestRedListStatusFinland.status,gathering.displayDateTime,gathering.interpretations.biogeographicalProvinceDisplayname,gathering.interpretations.coordinateAccuracy,unit.abundanceUnit,unit.atlasCode,unit.atlasClass,gathering.locality,unit.unitId,unit.linkings.taxon.scientificName,unit.interpretations.individualCount,unit.interpretations.recordQuality,unit.abundanceString,gathering.eventDate.begin,gathering.eventDate.end,gathering.gatheringId,document.collectionId,unit.det,unit.lifeStage,unit.linkings.taxon.id,unit.notes,unit.sex,document.documentId,document.notes,document.secureReasons,gathering.notes,gathering.team,unit.keywords,unit.linkings.taxon.nameSwedish,unit.linkings.taxon.nameEnglish,document.dataSource"
+    })
+    
+    session = requests.Session()
+    
+    try:
+        while True:
+            try:
+                response = session.get(full_url, params=params, timeout=REQUEST_TIMEOUT)
+                response.raise_for_status()
+                
                 data = response.json()
-                if not last_page:
-                    last_page = data.get('lastPage')
-                    progress_bar.setMaximum(last_page)
-
-                    total_records = data.get('total')
-                    if total_records > 1000000:
-                        QMessageBox.warning(None, 'FinBIF_Plugin', 'The number of features exceeds 1 million. Please refine your parameters.')
-                        break
+                
+                # Set up progress bar on first request
+                if params["page"] == 1:
+                    total_pages = data.get('lastPage', 1)
+                    progress_bar.setMaximum(total_pages)
+                
+                # Convert to GeoDataFrame if features exist
                 features = data.get('features', [])
-                all_features.extend(features)
-
-                params["page"] += 1
-                progress_bar.setValue(params["page"])  # Update progress bar
+                if features:
+                    # Create GeoDataFrame directly from GeoJSON
+                    gdf = gpd.GeoDataFrame.from_features(features, crs=epsg_string)
+                    yield gdf
+                
+                # Update progress and check for next page
+                progress_bar.setValue(params["page"])
+                QApplication.processEvents()
+                
                 if not data.get('nextPage'):
                     break
-            else:
-                QMessageBox.warning(None, 'FinBIF_Plugin', f'API Query Failed: {response.status_code} {response.text}')
+                    
+                params["page"] += 1
+                
+            except requests.exceptions.RequestException as e:
+                _handle_request_error(e, "data fetching")
                 break
-            QApplication.processEvents()  # Keep UI responsive
-
-        except requests.exceptions.SSLError as ssl_error:
-            QMessageBox.warning(None, 'FinBIF_Plugin', f'SSL Error: {ssl_error}')
-            break
-        except Exception as e:
-            QMessageBox.warning(None, 'FinBIF_Plugin', f'Unexpected error: {e}')
-            break
-    return all_features
+                
+    finally:
+        session.close()
 
 def request_api_key(email: str, dialog):
     """
