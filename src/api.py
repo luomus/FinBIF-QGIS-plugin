@@ -2,27 +2,29 @@ import requests
 from PyQt5.QtWidgets import QMessageBox, QApplication
 import json, certifi
 
-def fetch_data(params, progress_bar):
+def get_api_base_url(params):
+    """Determine the API base URL based on the test API parameter."""
     if 'use_test_api' in params:
-        api_base_url = "https://apitest.laji.fi/v0/"
-        params.pop('use_test_api')
+        params = params.pop('use_test_api')
+        return "https://apitest.laji.fi/v0/", params
     else:
-        api_base_url = "https://api.laji.fi/v0/"
-    base_url = api_base_url + "warehouse/query/unit/list"
-    
+        return "https://api.laji.fi/v0/", params 
+
+def fetch_data(params, progress_bar):
+    api_base_url, params = get_api_base_url(params)
+    full_url = api_base_url + "warehouse/query/unit/list"
+        
     params["format"] = "geojson"
     params["page"] = 1
     params["pageSize"] = 10000
     params["selected"] = "document.linkings.collectionQuality,document.loadDate,unit.linkings.taxon.threatenedStatus,unit.linkings.originalTaxon.administrativeStatuses,unit.linkings.taxon.taxonomicOrder,unit.linkings.originalTaxon.latestRedListStatusFinland.status,gathering.displayDateTime,gathering.interpretations.biogeographicalProvinceDisplayname,gathering.interpretations.coordinateAccuracy,unit.abundanceUnit,unit.atlasCode,unit.atlasClass,gathering.locality,unit.unitId,unit.linkings.taxon.scientificName,unit.interpretations.individualCount,unit.interpretations.recordQuality,unit.abundanceString,gathering.eventDate.begin,gathering.eventDate.end,gathering.gatheringId,document.collectionId,unit.det,unit.lifeStage,unit.linkings.taxon.id,unit.notes,unit.sex,document.documentId,document.notes,document.secureReasons,gathering.notes,gathering.team,unit.keywords,unit.linkings.taxon.nameSwedish,unit.linkings.taxon.nameEnglish,document.dataSource"
-
-
 
     all_features = []
     last_page = None
 
     while True:
         try:
-            response = requests.get(base_url, params=params)
+            response = requests.get(full_url, params=params)
             if response.status_code in [200, 201]:
                 data = response.json()
                 if not last_page:
@@ -135,19 +137,25 @@ def renew_api_key(email: str, dialog):
 
     dialog.accept()
 
-def get_total_obs(url):
+def get_total_obs(params):
     """
-    Get the last page number from the API response with retry logic.
+    Get the total number of observations from the API response.
 
     Parameters:
-    url (str): The URL of the Warehouse API endpoint.
+    params (dict): The parameters dictionary for the API request.
 
     Returns:
     int: Total numbers of occurrences from the API.
     """
-    url = url.replace('/list/', '/count/').replace('&geoJSON=true&featureType=ORIGINAL_FEATURE', '')
-    api_response = requests.get(url).json()
-    if api_response:
-        return api_response.get('total')
-    else:
+    api_base_url, params = get_api_base_url(params)
+    full_url = api_base_url + "warehouse/query/unit/count"
+    
+    try:
+        response = requests.get(full_url, params=params)
+        if response.status_code in [200, 201]:
+            api_response = response.json()
+            return api_response.get('total')
+        else:
+            return None
+    except Exception as e:
         return None

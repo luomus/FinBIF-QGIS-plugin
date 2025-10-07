@@ -426,10 +426,7 @@ class FinBIFDialog(QDialog):
         
         self.settings.setValue("FinBIF_API_Plugin/access_token", params["access_token"]) # Set access token to settings as a default value
         
-
-        full_url = f"https://api.laji.fi/v0/warehouse/query/unit/list?{'&'.join([f'{k}={v}' for k, v in params.items() if v])}"
-        total_obs = get_total_obs(full_url)
-
+        total_obs = get_total_obs(params)
 
         param_text = "\n".join(f"{key}: {value}" for key, value in params.items()) # Add all parameters to a text for user to see
 
