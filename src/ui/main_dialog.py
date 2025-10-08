@@ -18,12 +18,13 @@ CRS_MAPPINGS = {
 }
 
 class FinBIFDialog(QDialog):
-    def __init__(self, iface, areas, ranges, collection_names):
+    def __init__(self, iface, areas, ranges, collection_names, informal_taxon_names):
         super().__init__()
         self.iface = iface
         self.areas = areas
         self.ranges = ranges
-        self.collection_names = collection_names #TODO: translate collection names later
+        self.collection_names = collection_names
+        self.informal_taxon_names = informal_taxon_names
         self.settings = QSettings()
         self.is_running = False
         self.init_ui()
@@ -489,6 +490,8 @@ class FinBIFDialog(QDialog):
         for gdf in fetch_data(params, self.progress_bar, epsg_string):
             if gdf is not None and not gdf.empty:
 
+                gdf = merge_taxonomy_data(gdf, self.informal_taxon_names)
+                gdf = map_collection_id(gdf, self.collection_names)
                 gdf = combine_similar_columns(gdf)
                 gdf = convert_geometry_collection_to_multipolygon(gdf)
                 gdf = validate_geometry(gdf)

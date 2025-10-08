@@ -9,15 +9,15 @@ import pandas as pd
 FIELD_TYPE_MAP = {
     "gathering.eventDate.end": QVariant.Date,
     "gathering.eventDate.begin": QVariant.Date,
-    "unit.linkings.originalTaxon.taxonomicOrder": QVariant.Int,
+    "unit.linkings.taxon.taxonomicOrder": QVariant.Int,
     "unit.linkings.taxon.taxonomicOrder": QVariant.Int,
     "gathering.interpretations.coordinateAccuracy": QVariant.Int,
-    "unit.linkings.originalTaxon.occurrenceCountFinland": QVariant.Int,
-    "unit.linkings.originalTaxon.sensitive": QVariant.Bool,
+    "unit.linkings.taxon.occurrenceCountFinland": QVariant.Int,
+    "unit.linkings.taxon.sensitive": QVariant.Bool,
     "document.loadDate": QVariant.Date,
-    "unit.linkings.originalTaxon.finnish": QVariant.Bool,
-    "unit.linkings.originalTaxon.latestRedListStatusFinland.year": QVariant.Int,
-    "unit.linkings.originalTaxon.cursiveName": QVariant.Bool,
+    "unit.linkings.taxon.finnish": QVariant.Bool,
+    "unit.linkings.taxon.latestRedListStatusFinland.year": QVariant.Int,
+    "unit.linkings.taxon.cursiveName": QVariant.Bool,
     "unit.interpretations.individualCount": QVariant.Int
 }
 

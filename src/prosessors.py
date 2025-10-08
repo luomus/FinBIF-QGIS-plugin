@@ -4,16 +4,32 @@ from shapely.ops import unary_union
 import pandas as pd
 import geopandas as gpd
 
+def map_collection_id(gdf, collection_names):
+    """Map collection IDs to collection names
+    """
+    gdf['document.collectionName'] = gdf['document.collectionId'].str.split('/').str[-1].map(collection_names)
+    return gdf
+
+def merge_taxonomy_data(occurrence_gdf, taxonomy_df):
+    """ Merge taxonomy information to the occurrence data."""
+
+    if 'unit.linkings.taxon.informalTaxonGroups[0]' not in occurrence_gdf.columns:
+        occurrence_gdf['unit.linkings.taxon.informalTaxonGroups[0]'] = None
+        
+    occurrence_gdf['unit.linkings.taxon.informalTaxonGroups[0]'] = occurrence_gdf['unit.linkings.taxon.informalTaxonGroups[0]'].str.extract(r'(MVL\.\d+)')
+    merged_gdf = occurrence_gdf.merge(taxonomy_df, left_on='unit.linkings.taxon.informalTaxonGroups[0]', right_on='id', how='left')
+
+    # Drop all unit.linkings.taxon.informalTaxonGroup[n] columns
+    columns_to_drop = [col for col in merged_gdf.columns if col.startswith('unit.linkings.taxon.informalTaxonGroups[') and col.endswith(']')]
+    columns_to_drop.append('id')
+    if columns_to_drop:
+        merged_gdf.drop(columns=columns_to_drop, inplace=True)
+
+    return merged_gdf
 
 def validate_geometry(gdf):
-    """
-    Repairs invalid geometries.
-    Parameters:
-    gdf (geopandas.GeoDataFrame): The occurrence data GeoDataFrame.
+    """ Validate geometries in the GeoDataFrame."""
 
-    Returns:
-    gdf (geopandas.GeoDataFrame): The occurrence data GeoDataFrame where invalid geometries are fixed
-    """
     # Use make_valid to ensure all geometries are valid
     invalid = ~gdf['geometry'].is_valid
     gdf.loc[invalid, 'geometry'] = gdf.loc[invalid, 'geometry'].make_valid()
@@ -21,8 +37,8 @@ def validate_geometry(gdf):
 
 def convert_geometry_collection_to_multipolygon(gdf, buffer_distance=0.5):
     """Convert GeometryCollection to MultiPolygon in the entire GeoDataFrame, buffering points and lines if necessary.
-       The resulting MultiPolygon is dissolved into a single geometry.
-    """
+       The resulting MultiPolygon is dissolved into a single geometry."""
+
     def process_geometry(geometry):
         if isinstance(geometry, GeometryCollection):
             geom_types = {type(geom) for geom in geometry.geoms}

@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import QAction, QApplication, QProgressDialog, QMessageBox
 from PyQt5.QtCore import Qt
 from .ui.main_dialog import FinBIFDialog
 from .mappings import load_areas, load_ranges
-from .api import load_collection_names
+from .api import load_collection_names, load_informal_taxon_names
 
 class FinBIF_API_Plugin:
     def __init__(self, iface):
@@ -12,6 +12,7 @@ class FinBIF_API_Plugin:
         self.areas = None
         self.ranges = None
         self.collection_names = None
+        self.informal_taxon_names = None
 
     def load_data(self):
         """Load all required data for the plugin. Called lazily when dialog is first opened."""
@@ -19,7 +20,7 @@ class FinBIF_API_Plugin:
             return
         
         # Show progress dialog
-        progress = QProgressDialog("Loading plugin data...", "Cancel", 0, 3)
+        progress = QProgressDialog("Loading plugin data...", "Cancel", 0, 4)
         progress.setWindowModality(Qt.WindowModal)
         progress.setWindowTitle("FinBIF Plugin")
         progress.show()
@@ -51,6 +52,14 @@ class FinBIF_API_Plugin:
             progress.setValue(3)
             QApplication.processEvents()
 
+            if progress.wasCanceled():
+                return
+            
+            progress.setLabelText("Loading informal taxon names...")
+            self.informal_taxon_names = load_informal_taxon_names()
+            progress.setValue(4)
+            QApplication.processEvents()
+
             progress.close()
             self._data_loaded = True
 
@@ -74,5 +83,5 @@ class FinBIF_API_Plugin:
         self.load_data()
         if self._data_loaded:
             if not self.dialog:
-                self.dialog = FinBIFDialog(self.iface, self.areas, self.ranges, self.collection_names)
+                self.dialog = FinBIFDialog(self.iface, self.areas, self.ranges, self.collection_names, self.informal_taxon_names)
             self.dialog.show()

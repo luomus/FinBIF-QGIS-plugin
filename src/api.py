@@ -8,6 +8,7 @@ from qgis.core import QgsMessageLog, Qgis
 from PyQt5.QtWidgets import QMessageBox, QApplication
 import os
 import geopandas as gpd
+import pandas as pd
 
 PRODUCTION_API_BASE = "https://api.laji.fi/v0/"
 TEST_API_BASE = "https://apitest.laji.fi/v0/"
@@ -22,13 +23,34 @@ def get_api_base_url(params):
         return PRODUCTION_API_BASE, params
 
 @lru_cache(maxsize=1)
-def load_collection_names(lang='en'):
+def load_informal_taxon_names(lang='en'):
     """
-    Load collection names from the FinBIF API.
+    Fetch taxon data from the FinBIF API.
     
     Returns:
-    dict: Dictionary mapping collection IDs to collection names, or empty dict if request fails
+    pd.DataFrame: DataFrame containing taxon data, or empty DataFrame if request fails
     """
+    url = f"http://laji.fi/api/informal-taxon-groups?lang={lang}&pageSize=1000"
+
+    response = requests.get(url)
+    if response and response.status_code in [200, 201]:
+        data = response.json()
+        if data:
+            json_data_results = data.get('results', [])
+            df = pd.json_normalize(json_data_results)
+            df = df.rename(columns={'name': 'informalTaxonGroup'})
+            df = df.drop('hasSubGroup', axis=1, errors='ignore')
+            return df
+    
+    if response:
+        print(f"Warning: Failed to load taxon data: {response.status_code}")
+    
+    return pd.DataFrame()
+
+
+@lru_cache(maxsize=1)
+def load_collection_names(lang='en'):
+    """ Load collection names from the FinBIF API. """
     url = f"http://laji.fi/api/collections?pageSize=1500&lang={lang}"
 
     response = requests.get(url)
@@ -75,7 +97,7 @@ def fetch_data(params, progress_bar, epsg_string):
         "format": "geojson",
         "page": 1,
         "pageSize": 10000,
-        "selected": "document.linkings.collectionQuality,document.loadDate,unit.linkings.taxon.threatenedStatus,unit.linkings.originalTaxon.administrativeStatuses,unit.linkings.taxon.taxonomicOrder,unit.linkings.originalTaxon.latestRedListStatusFinland.status,gathering.displayDateTime,gathering.interpretations.biogeographicalProvinceDisplayname,gathering.interpretations.coordinateAccuracy,unit.abundanceUnit,unit.atlasCode,unit.atlasClass,gathering.locality,unit.unitId,unit.linkings.taxon.scientificName,unit.interpretations.individualCount,unit.interpretations.recordQuality,unit.abundanceString,gathering.eventDate.begin,gathering.eventDate.end,gathering.gatheringId,document.collectionId,unit.det,unit.lifeStage,unit.linkings.taxon.id,unit.notes,unit.sex,document.documentId,document.notes,document.secureReasons,gathering.notes,gathering.team,unit.keywords,unit.linkings.taxon.nameSwedish,unit.linkings.taxon.nameEnglish,document.dataSource"
+        "selected": "document.linkings.collectionQuality,document.loadDate,unit.linkings.taxon.threatenedStatus,unit.linkings.taxon.administrativeStatuses,unit.linkings.taxon.taxonomicOrder,unit.linkings.taxon.latestRedListStatusFinland.status,gathering.displayDateTime,gathering.interpretations.biogeographicalProvinceDisplayname,gathering.interpretations.coordinateAccuracy,unit.abundanceUnit,unit.atlasCode,unit.atlasClass,gathering.locality,unit.unitId,unit.linkings.taxon.scientificName,unit.interpretations.individualCount,unit.interpretations.recordQuality,unit.abundanceString,gathering.eventDate.begin,gathering.eventDate.end,gathering.gatheringId,document.collectionId,unit.det,unit.lifeStage,unit.linkings.taxon.id,unit.notes,unit.sex,document.documentId,document.notes,document.secureReasons,gathering.notes,gathering.team,unit.keywords,unit.linkings.taxon.nameSwedish,unit.linkings.taxon.nameEnglish,document.dataSource,unit.linkings.taxon.informalTaxonGroups"
     })
     
     session = requests.Session()
