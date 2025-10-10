@@ -10,17 +10,18 @@ import os
 import geopandas as gpd
 import pandas as pd
 
-PRODUCTION_API_BASE = "https://api.laji.fi/v0/"
-TEST_API_BASE = "https://apitest.laji.fi/v0/"
-REQUEST_TIMEOUT = 60  # seconds
+PRODUCTION_API_BASE = "https://api.laji.fi/"
+TEST_API_BASE = "https://apitest.laji.fi/"
+REQUEST_TIMEOUT = 6000  # seconds
 
 def get_api_base_url(params):
     """Determine the API base URL based on the test API parameter."""
-    if 'use_test_api' in params:
-        params = params.pop('use_test_api')
-        return TEST_API_BASE, params
+    params_copy = params.copy()
+    if 'use_test_api' in params_copy:
+        params_copy.pop('use_test_api')
+        return TEST_API_BASE, params_copy
     else:
-        return PRODUCTION_API_BASE, params
+        return PRODUCTION_API_BASE, params_copy
 
 @lru_cache(maxsize=1)
 def load_informal_taxon_names(lang='en'):
@@ -46,7 +47,6 @@ def load_informal_taxon_names(lang='en'):
         print(f"Warning: Failed to load taxon data: {response.status_code}")
     
     return pd.DataFrame()
-
 
 @lru_cache(maxsize=1)
 def load_collection_names(lang='en'):
@@ -80,20 +80,28 @@ def _handle_request_error(error, context="API request"):
 
 def fetch_data(params, progress_bar, epsg_string):
     """
-    Fetch data from FinBIF API and return as GeoDataFrame.
+    Fetch data from FinBIF API and return as complete GeoDataFrame.
     
     Parameters:
     params (dict): API parameters
     progress_bar: Progress bar widget to update
+    epsg_string (str): EPSG string for CRS
     
-    Yields:
-    gpd.GeoDataFrame: GeoDataFrame for each page of results
+    Returns:
+    gpd.GeoDataFrame: Complete GeoDataFrame with all results
     """
-    api_base_url, params = get_api_base_url(params)
+    api_base_url, processed_params = get_api_base_url(params)
     full_url = api_base_url + "warehouse/query/unit/list"
     
+    # Extract access_token from processed_params and add to headers
+    access_token = processed_params.pop('access_token', None)
+    headers = {}
+    if access_token:
+        headers['Authorization'] = access_token
+        headers['Api-Version'] = '1'
+    
     # Set required parameters
-    params.update({
+    processed_params.update({
         "format": "geojson",
         "page": 1,
         "pageSize": 10000,
@@ -101,42 +109,47 @@ def fetch_data(params, progress_bar, epsg_string):
     })
     
     session = requests.Session()
+    all_features = []  # Collect all features
     
     try:
         while True:
             try:
-                response = session.get(full_url, params=params, timeout=REQUEST_TIMEOUT)
+                response = session.get(full_url, params=processed_params, headers=headers, timeout=REQUEST_TIMEOUT)
                 response.raise_for_status()
                 
                 data = response.json()
                 
                 # Set up progress bar on first request
-                if params["page"] == 1:
+                if processed_params["page"] == 1:
                     total_pages = data.get('lastPage', 1)
                     progress_bar.setMaximum(total_pages)
                 
-                # Convert to GeoDataFrame if features exist
+                # Collect features from this page
                 features = data.get('features', [])
                 if features:
-                    # Create GeoDataFrame directly from GeoJSON
-                    gdf = gpd.GeoDataFrame.from_features(features, crs=epsg_string)
-                    yield gdf
+                    all_features.extend(features)
                 
                 # Update progress and check for next page
-                progress_bar.setValue(params["page"])
+                progress_bar.setValue(processed_params["page"])
                 QApplication.processEvents()
                 
                 if not data.get('nextPage'):
                     break
-                    
-                params["page"] += 1
-                
+
+                processed_params["page"] += 1
+
             except requests.exceptions.RequestException as e:
                 _handle_request_error(e, "data fetching")
                 break
                 
     finally:
         session.close()
+    
+    # Create single GeoDataFrame from all collected features
+    if all_features:
+        return gpd.GeoDataFrame.from_features(all_features, crs=epsg_string)
+    else:
+        return gpd.GeoDataFrame()
 
 def request_api_key(email: str, dialog):
     """
@@ -230,11 +243,18 @@ def get_total_obs(params):
     Returns:
     int: Total numbers of occurrences from the API.
     """
-    api_base_url, params = get_api_base_url(params)
+    api_base_url, params_copy = get_api_base_url(params)
     full_url = api_base_url + "warehouse/query/unit/count"
     
+    # Extract access_token from params and add to headers
+    access_token = params_copy.pop('access_token', None)
+    headers = {}
+    if access_token:
+        headers['Authorization'] = access_token
+        headers['Api-Version'] = '1'
+    
     try:
-        response = requests.get(full_url, params=params)
+        response = requests.get(full_url, params=params_copy, headers=headers)
         if response.status_code in [200, 201]:
             api_response = response.json()
             return api_response.get('total')

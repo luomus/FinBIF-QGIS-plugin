@@ -435,11 +435,10 @@ class FinBIFDialog(QDialog):
             self.submit_button.setText('Submit')
             return
         
-        self.settings.setValue("FinBIF_API_Plugin/access_token", params["access_token"]) # Set access token to settings as a default value
+        self.settings.setValue("FinBIF_API_Plugin/access_token", params["access_token"])
         
         total_obs = get_total_obs(params)
-
-        param_text = "\n".join(f"{key}: {value}" for key, value in params.items()) # Add all parameters to a text for user to see
+        param_text = "\n".join(f"{key}: {value}" for key, value in params.items())
 
         if total_obs and total_obs > MAX_OBSERVATIONS_LIMIT:
             QMessageBox.warning(
@@ -456,73 +455,55 @@ class FinBIFDialog(QDialog):
             return
         else:
             reply = QMessageBox.question(
-            None, 
-            'FinBIF_Plugin', 
-            f'Fetching {total_obs} occurrences with the following parameters:\n\n{param_text}\n\nDo you want to continue?',
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No  # Default option
+                None, 
+                'FinBIF_Plugin', 
+                f'Fetching {total_obs} occurrences with the following parameters:\n\n{param_text}\n\nDo you want to continue?',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
             )
 
         if reply == QMessageBox.No:
             self.is_running = False
             self.submit_button.setText('Submit')
-            return  # Exit function if No is selected
+            return
 
         self.progress_bar.setValue(0)
-
-        # Process data in batches to avoid memory issues
-        total_features = 0
         
         # Map the CRS to QGIS using constants
         epsg_string = CRS_MAPPINGS.get(params["crs"])
         qgis_crs = QgsCoordinateReferenceSystem(epsg_string)
 
-        # Collect GeoDataFrames by geometry type
-        gdfs_by_type = {
-            'Point': [],
-            'LineString': [],  
-            'Polygon': [],
-            'MultiPoint': [],
-            'MultiLineString': [],
-            'MultiPolygon': []
-        }
-
-        for gdf in fetch_data(params, self.progress_bar, epsg_string):
-            if gdf is not None and not gdf.empty:
-
-                gdf = merge_taxonomy_data(gdf, self.informal_taxon_names)
-                gdf = map_collection_id(gdf, self.collection_names)
-                gdf = combine_similar_columns(gdf)
-                gdf = convert_geometry_collection_to_multipolygon(gdf)
-                gdf = validate_geometry(gdf)
+        # Fetch all data at once
+        gdf = fetch_data(params, self.progress_bar, epsg_string)
+        
+        if gdf is not None and not gdf.empty:
+            # Process all data at once
+            gdf = merge_taxonomy_data(gdf, self.informal_taxon_names)
+            gdf = map_collection_id(gdf, self.collection_names)
+            gdf = combine_similar_columns(gdf)
+            gdf = convert_geometry_collection_to_multipolygon(gdf)
+            gdf = validate_geometry(gdf)
+            
+            if not gdf.empty:
+                total_features = len(gdf)
                 
-                # Group by geometry type and collect GeoDataFrames
-                if not gdf.empty:
-                    # Update total features count
-                    total_features += len(gdf)
-                    
-                    geom_types = gdf.geometry.geom_type.unique()
-                    for geom_type in geom_types:
-                        subset_gdf = gdf[gdf.geometry.geom_type == geom_type]
-                        if geom_type not in gdfs_by_type:
-                            gdfs_by_type[geom_type] = []
-                            QgsMessageLog.logMessage(f"Warning: Encountered unexpected geometry type '{geom_type}'", "FinBIF Plugin", Qgis.Warning)
-                        if not subset_gdf.empty:
-                            gdfs_by_type[geom_type].append(subset_gdf)
+                # Group by geometry type and create layers
+                gdfs_by_type = {}
+                geom_types = gdf.geometry.geom_type.unique()
                 
-                QApplication.processEvents()
+                for geom_type in geom_types:
+                    subset_gdf = gdf[gdf.geometry.geom_type == geom_type]
+                    if not subset_gdf.empty:
+                        gdfs_by_type[geom_type] = subset_gdf
 
-        if total_features > 0:
-            # Create one layer per geometry type from collected GeoDataFrames
-            for geom_type, gdf_list in gdfs_by_type.items():
-                if gdf_list:  # Only create layer if we have data for this geometry type
-                    # Concatenate all GeoDataFrames of this geometry type
-                    combined_gdf = pd.concat(gdf_list, ignore_index=True)
-                    if not combined_gdf.empty:
-                        layer_name = f"FinBIF_{geom_type}_Occurrences"
-                        create_layer(combined_gdf, layer_name, qgis_crs)
+                # Create one layer per geometry type
+                for geom_type, type_gdf in gdfs_by_type.items():
+                    layer_name = f"FinBIF_{geom_type}_Occurrences"
+                    create_layer(type_gdf, layer_name, qgis_crs)
 
-            QMessageBox.information(None, 'FinBIF_Plugin', f'API Query loaded {total_features} records to the map successfully.')
+                QMessageBox.information(None, 'FinBIF_Plugin', f'API Query loaded {total_features} records to the map successfully.')
+            else:
+                QMessageBox.information(None, 'FinBIF_Plugin', 'No valid data after processing.')
         else:
             QMessageBox.information(None, 'FinBIF_Plugin', 'No data was retrieved from the API')
 
