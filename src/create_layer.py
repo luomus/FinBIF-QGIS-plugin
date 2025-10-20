@@ -4,6 +4,7 @@ from qgis.PyQt.QtCore import QVariant
 import json
 from qgis.core import QgsFeature, QgsGeometry, QgsCoordinateReferenceSystem
 import pandas as pd
+from qgis.core import Qgis, QgsMessageLog
 
 
 FIELD_TYPE_MAP = {
@@ -80,6 +81,7 @@ def create_layer(gdf, layer_name, qgis_crs):
             feature.setGeometry(QgsGeometry.fromWkt(row.geometry.wkt))
         except:
             # Skip invalid geometries
+            QgsMessageLog.logMessage(f"Found invalid geometry {row.geometry.wkt} that prevented layer creation -> skipping.", level=Qgis.Warning)
             continue
         
         # Set attributes in the correct order matching field order

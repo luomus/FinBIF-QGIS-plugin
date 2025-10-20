@@ -11,10 +11,15 @@ from .api_key_dialog import open_api_key_dialog
 
 # Constants
 MAX_OBSERVATIONS_LIMIT = 500000
-CRS_MAPPINGS = {
+EPSG_MAPPINGS = {
     'EUREF': 'EPSG:3067',
     'YKJ': 'EPSG:2393',
     'WGS84': 'EPSG:4326'
+}
+CRS_MAPPINGS = {
+    'ETRS-TM35FIN (for Finnish)': 'EUREF',
+    'YKJ (for Finnish)': 'YKJ',
+    'WGS84 (for global)': 'WGS84'
 }
 
 class FinBIFDialog(QDialog):
@@ -62,8 +67,8 @@ class FinBIFDialog(QDialog):
         general_tab.setLayout(general_layout)
 
         self.crs_combo = QComboBox()
-        self.crs_combo.addItems(['ETRS-TM35FIN', 'YKJ', 'WGS84',])
-        self.crs_combo.setToolTip('Coordinate Reference System')
+        self.crs_combo.addItems(['ETRS-TM35FIN (for Finnish)', 'YKJ (for Finnish)', 'WGS84 (for global)',])
+        self.crs_combo.setToolTip('Coordinate Reference System. Note: ETRS-TM35FIN and YKJ only for Finnish data!')
         general_form_layout.addRow(QLabel('CRS:'), self.crs_combo)
 
         self.geom_type_combo = QComboBox()
@@ -364,7 +369,7 @@ class FinBIFDialog(QDialog):
         bird_association_area_id = map_values(self.bird_association_area_id_combo, self.areas['bird_association_areas'])
     
         params = {
-            "crs": crs if crs != 'ETRS-TM35FIN' else 'EUREF',
+            "crs": CRS_MAPPINGS.get(crs, 'WGS84'),
             "featureType": geom_type,
             "access_token": access_token
         }
@@ -438,7 +443,7 @@ class FinBIFDialog(QDialog):
         self.settings.setValue("FinBIF_API_Plugin/access_token", params["access_token"])
         
         total_obs = get_total_obs(params)
-        param_text = "\n".join(f"{key}: {value}" for key, value in params.items())
+        param_text = "\n".join(f"{key}: {value}" for key, value in params.items() if key != "access_token")
 
         if total_obs and total_obs > MAX_OBSERVATIONS_LIMIT:
             QMessageBox.warning(
@@ -470,7 +475,7 @@ class FinBIFDialog(QDialog):
         self.progress_bar.setValue(0)
         
         # Map the CRS to QGIS using constants
-        epsg_string = CRS_MAPPINGS.get(params["crs"])
+        epsg_string = EPSG_MAPPINGS.get(params["crs"])
         qgis_crs = QgsCoordinateReferenceSystem(epsg_string)
 
         # Fetch all data at once
