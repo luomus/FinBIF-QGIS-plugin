@@ -3,11 +3,256 @@ import re
 from shapely.ops import unary_union
 import pandas as pd
 import geopandas as gpd
+import json
+
+def process_countries(gdf, areas_dict):
+    """ Map country names to their corresponding IDs.
+    """
+    if 'gathering.interpretations.country' in gdf.columns:
+        gdf['gathering.interpretations.country'] = gdf['gathering.interpretations.country'].str.replace(r'http://[^/]+\.fi/', "", regex=True).map(areas_dict).fillna(gdf['gathering.interpretations.country'])
+
+    return gdf
+
+def process_boolean_fields(gdf):
+    """ Map single value fields to their corresponding enum values.
+    """
+    columns_to_process = ['unit.linkings.taxon.sensitive']
+    for col in columns_to_process:
+        if col in gdf.columns:
+            gdf[col] = gdf[col].map({'true': True, 'false': False}).fillna(gdf[col])
+
+    return gdf
+
+def map_single_value_fields(gdf, enums):
+    columns_to_map = {'unit.atlasClass',
+                      'unit.atlasCode',
+                      'document.licenseId',
+                      'unit.linkings.taxon.latestRedListStatusFinland.status',
+                      'unit.linkings.taxon.taxonRank',
+                      'document.linkings.collectionQuality',
+                      'unit.linkings.taxon.threatenedStatus',
+                      'unit.sex',
+                      'unit.lifeStage',
+                      'unit.linkings.taxon.administrativeStatuses',
+                      'document.secureReasons',
+                      'unit.linkings.taxon.primaryHabitat.habitat',
+                      'document.sourceId',
+                      'unit.recordBasis',
+                      'gathering.interpretations.sourceOfCoordinates',
+                      'unit.interpretations.recordQuality'
+                      }
+    
+    # Find all columns that match the base patterns (including those with [n] suffixes)
+    columns_to_process = []
+    for base_col in columns_to_map:
+        # Find exact matches
+        if base_col in gdf.columns:
+            columns_to_process.append(base_col)
+        
+        # Find columns with [n] suffixes
+        pattern = re.compile(rf'^{re.escape(base_col)}\[\d+\]$')
+        matching_cols = [col for col in gdf.columns if pattern.match(col)]
+        columns_to_process.extend(matching_cols)
+    
+    # Process each found column
+    for col in columns_to_process:
+        if col in gdf.columns:  # Fixed typo: was gdf.columns.st
+            gdf[col] = gdf[col].str.replace(r'http://[^/]+\.fi/', "", regex=True).map(enums).fillna(gdf[col])
+    
+    return gdf
+
+def process_dates(gdf): # Not in use currently
+    def combine_datetime_components(begin_date, begin_hour=None, begin_minutes=None, 
+                                   end_date=None, end_hour=None, end_minutes=None):
+        """
+        Combine date, hour, and minute components into ISO 8601 datetime format.
+        
+        Returns:
+            String in ISO 8601 format (date or date/date interval)
+            TODO: Clean this or check if available from the API
+        """
+        if pd.isna(begin_date) or not str(begin_date).strip():
+            return None
+        
+        # Build start datetime string
+        start_datetime = str(begin_date).strip()
+        if pd.notna(begin_hour) and str(begin_hour).strip():
+            hour_str = f"{int(float(begin_hour)):02d}"
+            minute_str = f"{int(float(begin_minutes or 0)):02d}"
+            start_datetime += f"T{hour_str}:{minute_str}"
+        
+        # If no end date, return just the start
+        if pd.isna(end_date) or not str(end_date).strip():
+            return start_datetime
+        
+        # Build end datetime string
+        end_datetime = str(end_date).strip()
+        if pd.notna(end_hour) and str(end_hour).strip():
+            hour_str = f"{int(float(end_hour)):02d}"
+            minute_str = f"{int(float(end_minutes or 0)):02d}"
+            end_datetime += f"T{hour_str}:{minute_str}"
+        
+        # Return as interval
+        return f"{start_datetime}/{end_datetime}"
+
+    # Get all relevant columns
+    date_cols = ['gathering.eventDate.begin', 'gathering.eventDate.end', 
+                 'gathering.hourBegin', 'gathering.minutesBegin',
+                 'gathering.hourEnd', 'gathering.minutesEnd']
+    
+    existing_cols = [col for col in date_cols if col in gdf.columns]
+    
+    if existing_cols:
+        # Create the combined eventDate column
+        gdf['eventDate'] = gdf.apply(lambda row: combine_datetime_components(
+            row.get('gathering.eventDate.begin'),
+            row.get('gathering.hourBegin'),
+            row.get('gathering.minutesBegin'),
+            row.get('gathering.eventDate.end'),
+            row.get('gathering.hourEnd'),
+            row.get('gathering.minutesEnd')
+        ), axis=1)
+        
+        # Drop the individual date/time columns
+        gdf = gdf.drop(columns=existing_cols)
+    else:
+        gdf['eventDate'] = None
+
+    return gdf
+
+def process_event_remarks(gdf):
+    cols_to_join = ['gathering.notes', 'document.notes']
+
+    # Filter to only include columns that exist in the dataframe
+    existing_cols = [col for col in cols_to_join if col in gdf.columns]
+
+    if existing_cols:
+        gdf['eventRemarks'] = (gdf[existing_cols].fillna('').agg(lambda x: ', '.join([v for v in x if v.strip() != '']), axis=1))
+        gdf = gdf.drop(columns=existing_cols)
+    else:
+        gdf['eventRemarks'] = None
+
+    return gdf
+
+def process_other_catalog_numbers(gdf):
+    cols_to_join = ['unit.keywords', 'document.keywords']
+
+    # Filter to only include columns that exist in the dataframe
+    existing_cols = [col for col in cols_to_join if col in gdf.columns]
+
+    if existing_cols:
+        gdf['otherCatalogNumbers'] = (gdf[existing_cols].fillna('').agg(lambda x: ', '.join([v for v in x if v.strip() != '']), axis=1))
+        gdf = gdf.drop(columns=existing_cols)
+    else:
+        gdf['otherCatalogNumbers'] = None
+
+    return gdf
+
+def process_taxon_preferred_habitat(gdf):
+    cols_to_join = ['unit.linkings.taxon.primaryHabitat.habitat',
+                    'unit.linkings.taxon.primaryHabitat.habitatSpecificTypes']
+
+    # Filter to only include columns that exist in the dataframe
+    existing_cols = [col for col in cols_to_join if col in gdf.columns]
+
+    if existing_cols:
+        gdf['taxonPreferredHabitat'] = (gdf[existing_cols].fillna('').agg(lambda x: ', '.join([v for v in x if v.strip() != '']), axis=1))
+        gdf = gdf.drop(columns=existing_cols)
+    else:
+        gdf['taxonPreferredHabitat'] = None
+
+    return gdf
+
+def process_quality_issues(gdf):
+    cols_to_join = ['document.quality.issue.issue',
+                    'document.quality.issue.message',
+                    'document.quality.issue.source',
+                    'gathering.quality.issue.issue',
+                    'gathering.quality.issue.message',
+                    'gathering.quality.issue.source',
+                    'gathering.quality.locationIssue.issue',
+                    'gathering.quality.locationIssue.message',
+                    'gathering.quality.locationIssue.source',
+                    'gathering.quality.timeIssue.issue',
+                    'gathering.quality.timeIssue.message',
+                    'gathering.quality.timeIssue.source',
+                    'unit.quality.issue.issue',
+                    'unit.quality.issue.message',
+                    'unit.quality.issue.source']
+
+    # Filter to only include columns that exist in the dataframe
+    existing_cols = [col for col in cols_to_join if col in gdf.columns]
+
+    if existing_cols:
+        gdf['qualityIssues'] = (gdf[existing_cols].fillna('').agg(lambda x: ', '.join([v for v in x if v.strip() != '']), axis=1))
+        gdf = gdf.drop(columns=existing_cols)
+    else:
+        gdf['qualityIssues'] = None
+
+    return gdf
+
+def process_dynamic_properties(gdf):
+    cols_to_join = ['gathering.accurateArea', 
+                    'gathering.gatheringSection', 
+                    'unit.alive', 
+                    'unit.individualId', 
+                    'unit.plantStatusCode', 
+                    'unit.wild']
+
+    # Filter to only include columns that exist in the dataframe
+    existing_cols = [col for col in cols_to_join if col in gdf.columns]
+
+    if existing_cols:
+        def create_dynamic_properties_json(row):
+            properties_dict = {}
+            for col in existing_cols:
+                value = row[col]
+                if pd.notna(value) and str(value).strip():
+                    # Use the column name without the prefix as the key
+                    key = col.split('.')[-1]  # Gets the last part after the dot
+                    properties_dict[key] = value
+            
+            # Return JSON string if there are properties, otherwise None
+            return json.dumps(properties_dict) if properties_dict else None
+        
+        gdf['dynamicProperties'] = gdf.apply(create_dynamic_properties_json, axis=1)
+        gdf = gdf.drop(columns=existing_cols)
+    else:
+        gdf['dynamicProperties'] = None
+    
+    return gdf
+
+def process_verbatim_location_values(gdf):
+    cols_to_join = ['gathering.biogeographicalProvince', 
+                    'gathering.country', 
+                    'gathering.higherGeography', 
+                    'gathering.interpretations.countryDisplayname', 
+                    'gathering.municipality', 
+                    'gathering.province',
+                    'gathering.locality',]
+
+    # Filter to only include columns that exist in the dataframe
+    existing_cols = [col for col in cols_to_join if col in gdf.columns]
+
+    if existing_cols:
+        def combine_unique_values(row):
+            # Collect all non-empty values
+            values = [str(v).strip() for v in row[existing_cols] if pd.notna(v) and str(v).strip() != '']
+            # Remove duplicates while preserving order
+            unique_values = list(dict.fromkeys(values))
+            return ', '.join(unique_values) if unique_values else None
+        
+        gdf['verbatimLocality'] = gdf.apply(combine_unique_values, axis=1)
+        gdf = gdf.drop(columns=existing_cols)
+    else:
+        gdf['verbatimLocality'] = None
+    
+    return gdf
 
 def map_collection_id(gdf, collection_names):
     """Map collection IDs to collection names
     """
-    gdf['document.collectionName'] = gdf['document.collectionId'].str.split('/').str[-1].map(collection_names)
+    gdf['datasetName'] = gdf['document.collectionId'].str.split('/').str[-1].map(collection_names)
     return gdf
 
 def merge_taxonomy_data(occurrence_gdf, taxonomy_df):
@@ -91,37 +336,31 @@ def combine_similar_columns(gdf):
     """
     Finds similar columns (e.g. keyword[0], keyword[1], keyword[2]) and combines them
     """
-    # Use regex to find columns with a pattern containing [n]
     pattern = re.compile(r'^(.+?)(\[\d+\])(.*)$')
-
-    # Dictionary to store the groups of columns
     columns_dict = {}
 
     for col in gdf.columns:
         match = pattern.match(col)
         if match:
-            base_name = match.group(1) + match.group(3)  # Remove the [n] part
-            if base_name not in columns_dict:
-                columns_dict[base_name] = []
-            columns_dict[base_name].append(col)
-    
+            base_name = match.group(1) + match.group(3)
+            columns_dict.setdefault(base_name, []).append(col)
+
     gdf = gdf.copy()
 
-    # Combine columns in each group
     for base_name, cols in columns_dict.items():
-        if len(cols) > 1:  # Only combine if there are multiple columns
-            # Properly combine the values from multiple columns
-            combined_values = []
-            for idx in range(len(gdf)):
-                row_values = []
-                for col in cols:
-                    value = gdf.iloc[idx][col]
-                    if pd.notna(value) and str(value).strip():
-                        row_values.append(str(value))
-                # Join non-empty values with comma and space
-                combined_values.append(', '.join(row_values) if row_values else None)
-            
-            gdf[base_name] = combined_values
+        if len(cols) > 1:
+            # Vectorized row-wise combine
+            gdf[base_name] = gdf[cols].apply(
+                lambda row: ', '.join([str(v).strip() for v in row if pd.notna(v) and str(v).strip()]) or None,
+                axis=1
+            )
             gdf.drop(columns=cols, inplace=True)
+        else:
+            gdf.rename(columns={cols[0]: base_name}, inplace=True)
 
+    return gdf
+
+def translate_column_names(gdf, lookup_df, style='dwc'):
+    column_mapping = dict(zip(lookup_df['api'], lookup_df[style]))
+    gdf = gdf.rename(columns=column_mapping)
     return gdf

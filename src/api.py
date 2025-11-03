@@ -9,10 +9,88 @@ from PyQt5.QtWidgets import QMessageBox, QApplication
 import os
 import geopandas as gpd
 import pandas as pd
+from functools import lru_cache
+import time
+
+# Global session for connection reuse
+_session = None
 
 PRODUCTION_API_BASE = "https://api.laji.fi/"
 TEST_API_BASE = "https://apitest.laji.fi/"
-REQUEST_TIMEOUT = 6000  # seconds
+REQUEST_TIMEOUT = 180  # seconds
+
+@lru_cache(maxsize=128)
+def fetch_json_with_retry(url, max_retries=3, delay=5):
+    """
+    Fetches JSON data from an API URL with retry logic and caching.
+    
+    Parameters:
+    url (str): The API URL to fetch JSON data from
+    max_retries (int): The maximum number of retry attempts in case of failure
+    delay (int): The delay between retries in seconds
+    
+    Returns:
+    dict or None: Parsed JSON data from the API as a dictionary, or None if the request fails
+    """
+   
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, timeout=REQUEST_TIMEOUT)
+            if response.status_code in [200, 201]:
+                return response.json()
+            else:
+                QgsMessageLog.logMessage(f"Attempt {attempt + 1}: HTTP {response.status_code} for {url}", "FinBIF Plugin", Qgis.Warning)
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Attempt {attempt + 1} failed for {url}: {e}", "FinBIF Plugin", Qgis.Warning)
+            
+        if attempt < max_retries - 1:  # Don't sleep on the last attempt
+            time.sleep(delay)
+    
+    QgsMessageLog.logMessage(f"All attempts failed for {url}", "FinBIF Plugin", Qgis.Critical)
+    return None
+
+def get_value_enums(lang='en'):
+    """Fetches JSON data from an API URL and returns it as a Python dictionary."""
+    url = f"http://laji.fi/api/metadata/ranges?lang={lang}&asLookupObject=true"
+    first_part = fetch_json_with_retry(url)
+
+    url2 = f"http://laji.fi/api/warehouse/enumeration-labels?lang={lang}"
+    second_part = fetch_json_with_retry(url2)
+
+    url3 = f'https://laji.fi/api/sources?lang={lang}&pageSize=100'
+    third_part = fetch_json_with_retry(url3)
+
+    if not first_part or not second_part or not third_part:
+        raise ValueError("Error getting enumeration values.")
+
+    # Extract "enumeration" keys and "en" labels
+    enumerations = {
+        item['enumeration']: item['label'][lang]
+        for item in second_part.get('results', [])
+        if item.get('label') and item['label'].get(lang)
+    }
+
+    sources = {source['id']: source['name'] for source in third_part.get('results', []) if 'id' in source and 'name' in source}
+
+    return first_part | enumerations | sources
+
+def get_enumerations(lang='en'):
+    """
+    Fetches JSON data from an API URL and extracts a dictionary of enumerations 
+    with 'enumeration' as keys and 'en' labels as values.
+    """
+    url = f"http://laji.fi/api/warehouse/enumeration-labels?lang={lang}"
+    json_data = fetch_json_with_retry(url)
+    if not json_data:
+        raise ValueError("Error getting enumeration values.")
+
+    # Extract "enumeration" keys and "en" labels
+    enumerations = {
+        item['enumeration']: item['label'][lang]
+        for item in json_data.get('results', [])
+        if item.get('label') and item['label'].get(lang)
+    }
+    return enumerations
 
 def get_api_base_url(params):
     """Determine the API base URL based on the test API parameter."""
@@ -69,7 +147,7 @@ def _handle_request_error(error, context="API request"):
     QgsMessageLog.logMessage(f"Error during {context}: {error}", "FinBIF Plugin", Qgis.Critical)
     
     error_messages = {
-        requests.exceptions.Timeout: f'Request timed out after {REQUEST_TIMEOUT} seconds. Please try again.',
+        requests.exceptions.Timeout: f'Request timed out after {REQUEST_TIMEOUT} seconds. Please try again later.',
         requests.exceptions.ConnectionError: 'Unable to connect to the FinBIF API. Check your internet connection.',
         requests.exceptions.HTTPError: f'Server error: {error}. Please try again later.',
         requests.exceptions.RequestException: f'Network error: {error}'
@@ -78,7 +156,7 @@ def _handle_request_error(error, context="API request"):
     message = error_messages.get(type(error), f'Unexpected error: {error}')
     QMessageBox.warning(None, 'FinBIF_Plugin', message)
 
-def fetch_data(params, progress_bar, epsg_string):
+def fetch_data(params, progress_bar, epsg_string, lookup_df):
     """
     Fetch data from FinBIF API and return as complete GeoDataFrame.
     
@@ -86,7 +164,8 @@ def fetch_data(params, progress_bar, epsg_string):
     params (dict): API parameters
     progress_bar: Progress bar widget to update
     epsg_string (str): EPSG string for CRS
-    
+    lookup_df (pd.DataFrame): DataFrame containing column information
+
     Returns:
     gpd.GeoDataFrame: Complete GeoDataFrame with all results
     """
@@ -105,7 +184,7 @@ def fetch_data(params, progress_bar, epsg_string):
         "format": "geojson",
         "page": 1,
         "pageSize": 10000,
-        "selected": "document.linkings.collectionQuality,document.loadDate,unit.linkings.taxon.threatenedStatus,unit.linkings.taxon.administrativeStatuses,unit.linkings.taxon.taxonomicOrder,unit.linkings.taxon.latestRedListStatusFinland.status,gathering.displayDateTime,gathering.interpretations.biogeographicalProvinceDisplayname,gathering.interpretations.coordinateAccuracy,unit.abundanceUnit,unit.atlasCode,unit.atlasClass,gathering.locality,unit.unitId,unit.linkings.taxon.scientificName,unit.interpretations.individualCount,unit.interpretations.recordQuality,unit.abundanceString,gathering.eventDate.begin,gathering.eventDate.end,gathering.gatheringId,document.collectionId,unit.det,unit.lifeStage,unit.linkings.taxon.id,unit.notes,unit.sex,document.documentId,document.notes,document.secureReasons,gathering.notes,gathering.team,unit.keywords,unit.linkings.taxon.nameSwedish,unit.linkings.taxon.nameEnglish,document.dataSource,unit.linkings.taxon.informalTaxonGroups"
+        "selected": ",".join([field for field in lookup_df['api'].dropna().to_list() if field])
     })
     
     session = requests.Session()
@@ -254,7 +333,7 @@ def get_total_obs(params):
         headers['Api-Version'] = '1'
     
     try:
-        response = requests.get(full_url, params=params_copy, headers=headers)
+        response = requests.get(full_url, params=params_copy, headers=headers, timeout=REQUEST_TIMEOUT)
         if response.status_code in [200, 201]:
             api_response = response.json()
             return api_response.get('total')

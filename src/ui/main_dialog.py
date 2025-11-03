@@ -8,6 +8,8 @@ from ..prosessors import *
 from ..validators import *
 from ..create_layer import create_layer
 from .api_key_dialog import open_api_key_dialog
+from time import time
+from qgis.core import QgsMessageLog, Qgis
 
 # Constants
 MAX_OBSERVATIONS_LIMIT = 500000
@@ -23,7 +25,7 @@ CRS_MAPPINGS = {
 }
 
 class FinBIFDialog(QDialog):
-    def __init__(self, iface, areas, ranges, collection_names, informal_taxon_names):
+    def __init__(self, iface, areas, ranges, collection_names, informal_taxon_names, lookup_df, enums):
         super().__init__()
         self.iface = iface
         self.areas = areas
@@ -32,6 +34,8 @@ class FinBIFDialog(QDialog):
         self.informal_taxon_names = informal_taxon_names
         self.settings = QSettings()
         self.is_running = False
+        self.lookup_df = lookup_df
+        self.enums = enums
         self.init_ui()
 
     def init_ui(self):
@@ -339,7 +343,7 @@ class FinBIFDialog(QDialog):
         geom_type = self.geom_type_combo.currentText()
         collection_id = self.collection_id_input.text()
         collection_id_not = self.collection_id_not_input.text()
-        time = self.time_input.get_selected_dates()
+        time_input = self.time_input.get_selected_dates()
         taxon_id = self.taxon_id_input.text()
         informal_taxon_group_id = self.informal_taxon_group_id_input.text()
         informal_taxon_group_id_not = self.informal_taxon_group_id_not_input.text()
@@ -378,8 +382,8 @@ class FinBIFDialog(QDialog):
             params["collectionId"] = collection_id
         if collection_id_not:
             params["collectionIdNot"] = collection_id_not
-        if time:
-            params["time"] = time
+        if time_input:
+            params["time"] = time_input
         if taxon_id:
             params["target"] = taxon_id
         if informal_taxon_group_id:
@@ -479,15 +483,25 @@ class FinBIFDialog(QDialog):
         qgis_crs = QgsCoordinateReferenceSystem(epsg_string)
 
         # Fetch all data at once
-        gdf = fetch_data(params, self.progress_bar, epsg_string)
-        
+        gdf = fetch_data(params, self.progress_bar, epsg_string, self.lookup_df)
+                
         if gdf is not None and not gdf.empty:
-            # Process all data at once
+            # Process all data at once            
             gdf = merge_taxonomy_data(gdf, self.informal_taxon_names)
             gdf = map_collection_id(gdf, self.collection_names)
+            gdf = map_single_value_fields(gdf, self.enums)
             gdf = combine_similar_columns(gdf)
             gdf = convert_geometry_collection_to_multipolygon(gdf)
             gdf = validate_geometry(gdf)
+            gdf = process_other_catalog_numbers(gdf)
+            gdf = process_event_remarks(gdf)
+            gdf = process_verbatim_location_values(gdf)
+            gdf = process_dynamic_properties(gdf)
+            gdf = process_quality_issues(gdf)
+            gdf = process_taxon_preferred_habitat(gdf)
+            gdf = process_boolean_fields(gdf)
+            gdf = process_countries(gdf, self.areas['countries_by_id'])
+            gdf = translate_column_names(gdf, self.lookup_df)
             
             if not gdf.empty:
                 total_features = len(gdf)

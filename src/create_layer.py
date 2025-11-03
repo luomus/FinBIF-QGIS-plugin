@@ -1,25 +1,23 @@
 from qgis.core import QgsVectorLayer, QgsProject, QgsFields, QgsField
 from PyQt5.QtWidgets import QMessageBox
 from qgis.PyQt.QtCore import QVariant
-import json
 from qgis.core import QgsFeature, QgsGeometry, QgsCoordinateReferenceSystem
 import pandas as pd
+import numpy as np
 from qgis.core import Qgis, QgsMessageLog
 
-
 FIELD_TYPE_MAP = {
-    "gathering.eventDate.end": QVariant.Date,
-    "gathering.eventDate.begin": QVariant.Date,
-    "unit.linkings.taxon.taxonomicOrder": QVariant.Int,
-    "unit.linkings.taxon.taxonomicOrder": QVariant.Int,
-    "gathering.interpretations.coordinateAccuracy": QVariant.Int,
-    "unit.linkings.taxon.occurrenceCountFinland": QVariant.Int,
-    "unit.linkings.taxon.sensitive": QVariant.Bool,
-    "document.loadDate": QVariant.Date,
-    "unit.linkings.taxon.finnish": QVariant.Bool,
-    "unit.linkings.taxon.latestRedListStatusFinland.year": QVariant.Int,
-    "unit.linkings.taxon.cursiveName": QVariant.Bool,
-    "unit.interpretations.individualCount": QVariant.Int
+    "eventDate": QVariant.Date,
+    "coordinateAccuracy": QVariant.Int,
+    "individualCount": QVariant.Int,
+    "isSensitiveTaxon": QVariant.Bool,
+    "availableDate": QVariant.Bool,
+    "redListStatusFinlandYear": QVariant.Int,
+    "isBreedingSite": QVariant.Bool,
+    "isMigrating": QVariant.Bool,
+    "isStateLand": QVariant.Bool,
+    "maleIndividualCount": QVariant.Int,
+    "femaleIndividualCount": QVariant.Int,
 }
 
 def create_layer(gdf, layer_name, qgis_crs):
@@ -45,14 +43,14 @@ def create_layer(gdf, layer_name, qgis_crs):
         QMessageBox.warning(None, 'FinBIF_Plugin', f'Failed to create {layer_name} layer')
         return
     
-    # Get column names excluding geometry - this preserves the order
+    # Get column names excluding geometry
     column_names = [col for col in gdf.columns if col != 'geometry']
-    
-    # Add fields based on GeoDataFrame columns in the correct order
+
+    # Add fields based on GeoDataFrame columns
     data_provider = layer.dataProvider()
     fields = QgsFields()
 
-    for col_name in column_names:  # Use ordered column names
+    for col_name in column_names:
         dtype = gdf.dtypes[col_name]
         # Map pandas dtypes to QGIS QVariant types
         qvariant_type = FIELD_TYPE_MAP.get(col_name, QVariant.String)
@@ -90,7 +88,9 @@ def create_layer(gdf, layer_name, qgis_crs):
             value = row[col]
 
             # Convert to appropriate Python type for QGIS
-            if isinstance(value, pd.Timestamp):
+            if pd.isna(value):
+                attributes.append(None)
+            elif isinstance(value, pd.Timestamp):
                 attributes.append(value.to_pydatetime())
             elif isinstance(value, pd.Period):
                 attributes.append(str(value))

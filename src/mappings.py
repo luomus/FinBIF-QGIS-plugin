@@ -1,4 +1,8 @@
 import json, os
+from pandas import read_csv
+
+def get_lookup_table():
+    return read_csv(os.path.join(os.path.dirname(__file__), 'resources/columns_lookup.csv'), sep='\t', header=0)
 
 def load_areas():
     plugin_dir = os.path.dirname(__file__)
@@ -8,6 +12,7 @@ def load_areas():
         data = json.load(file)
     
     countries = {}
+    countries_by_id = {}
     municipalities = {}
     biogeographical_areas = {}
     provinces = {}
@@ -20,6 +25,7 @@ def load_areas():
 
         if area['areaType'] == 'ML.country':
             countries[area_name] = area_id
+            countries_by_id[area_id] = area.get('countryCodeISOalpha2', 'Unknown')
         elif area['areaType'] == 'ML.municipality':
             municipalities[area_name] = area_id
         elif area['areaType'] == 'ML.biogeographicalProvince':
@@ -33,6 +39,7 @@ def load_areas():
 
     return {
         'countries': countries,
+        'countries_by_id': countries_by_id,
         'municipalities': municipalities,
         'biogeographical_areas': biogeographical_areas,
         'provinces': provinces,

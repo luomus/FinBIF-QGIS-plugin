@@ -12,12 +12,19 @@ The FinBIF API Plugin for QGIS allows users to fetch data from the FinBIF API an
 - User-friendly interface
 
 ## Installation
+### Installation from ZIP
 
 1. Download the [FinBIF_QGIS_Plugin.zip](https://github.com/luomus/FinBIF-QGIS-plugin/blob/main/FinBIF_QGIS_Plugin.zip) file from the repository.
 2. Open QGIS and go to `Plugins` > `Manage and Install Plugins`.
 3. Click on the `Install from ZIP` button and select the downloaded plugin ZIP file.
 4. Click `Install Plugin`.
 5. The plugin should be visible on the QGIS toolbar
+
+### Installation from QGIS Plugin Repository
+1. Open QGIS and go to `Plugins` > `Manage and Install Plugins`.
+2. Search for **FinBIF_API_Plugin** in the QGIS Plugin Repository.
+3. Click `Install Plugin`.
+4. The plugin should be visible on the QGIS toolbar.
 
 ![image](https://github.com/user-attachments/assets/4ee7d5fe-7558-4b9c-8541-f07d330b2f46)
 

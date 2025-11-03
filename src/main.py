@@ -1,8 +1,8 @@
 from PyQt5.QtWidgets import QAction, QApplication, QProgressDialog, QMessageBox
 from PyQt5.QtCore import Qt
 from .ui.main_dialog import FinBIFDialog
-from .mappings import load_areas, load_ranges
-from .api import load_collection_names, load_informal_taxon_names
+from .mappings import load_areas, load_ranges, get_lookup_table
+from .api import load_collection_names, load_informal_taxon_names, get_value_enums
 
 class FinBIF_API_Plugin:
     def __init__(self, iface):
@@ -13,6 +13,8 @@ class FinBIF_API_Plugin:
         self.ranges = None
         self.collection_names = None
         self.informal_taxon_names = None
+        self.lookup_df = None
+        self.enums = None
 
     def load_data(self):
         """Load all required data for the plugin. Called lazily when dialog is first opened."""
@@ -20,7 +22,7 @@ class FinBIF_API_Plugin:
             return
         
         # Show progress dialog
-        progress = QProgressDialog("Loading plugin data...", "Cancel", 0, 4)
+        progress = QProgressDialog("Loading plugin data...", "Cancel", 0, 6)
         progress.setWindowModality(Qt.WindowModal)
         progress.setWindowTitle("FinBIF Plugin")
         progress.show()
@@ -60,6 +62,25 @@ class FinBIF_API_Plugin:
             progress.setValue(4)
             QApplication.processEvents()
 
+            if progress.wasCanceled():
+                return
+
+            progress.setLabelText("Loading lookup table...")
+            progress.setValue(5)
+            QApplication.processEvents()
+            self.lookup_df = get_lookup_table()
+
+            if progress.wasCanceled():
+                return
+
+            progress.setLabelText("Loading enumerations...")
+            self.enums = get_value_enums()
+            progress.setValue(6)
+            QApplication.processEvents()
+
+            if progress.wasCanceled():
+                return
+
             progress.close()
             self._data_loaded = True
 
@@ -83,5 +104,5 @@ class FinBIF_API_Plugin:
         self.load_data()
         if self._data_loaded:
             if not self.dialog:
-                self.dialog = FinBIFDialog(self.iface, self.areas, self.ranges, self.collection_names, self.informal_taxon_names)
+                self.dialog = FinBIFDialog(self.iface, self.areas, self.ranges, self.collection_names, self.informal_taxon_names, self.lookup_df, self.enums)
             self.dialog.show()
