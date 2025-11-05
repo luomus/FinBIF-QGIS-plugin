@@ -1,5 +1,5 @@
 import re
-from PyQt5.QtWidgets import QMessageBox
+from qgis.PyQt.QtWidgets import QMessageBox
 
 def validate_email(email, parent=None):
     """Validate email format and show error if invalid."""

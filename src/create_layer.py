@@ -1,5 +1,5 @@
 from qgis.core import QgsVectorLayer, QgsProject, QgsFields, QgsField
-from PyQt5.QtWidgets import QMessageBox
+from qgis.PyQt.QtWidgets import QMessageBox
 from qgis.PyQt.QtCore import QVariant
 from qgis.core import QgsFeature, QgsGeometry, QgsCoordinateReferenceSystem
 import pandas as pd
@@ -79,7 +79,7 @@ def create_layer(gdf, layer_name, qgis_crs):
             feature.setGeometry(QgsGeometry.fromWkt(row.geometry.wkt))
         except:
             # Skip invalid geometries
-            QgsMessageLog.logMessage(f"Found invalid geometry {row.geometry.wkt} that prevented layer creation -> skipping.", level=Qgis.Warning)
+            QgsMessageLog.logMessage(f"Found invalid geometry {row.geometry.wkt} that prevented layer creation -> skipping.", level=Qgis.MessageLevel.Warning)
             continue
         
         # Set attributes in the correct order matching field order

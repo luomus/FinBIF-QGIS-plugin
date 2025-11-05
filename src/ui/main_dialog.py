@@ -1,5 +1,5 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, QPushButton, QCheckBox, QTabWidget, QWidget, QLabel, QProgressBar, QSlider, QMessageBox
-from PyQt5.QtCore import QSettings, Qt
+from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, QPushButton, QCheckBox, QTabWidget, QWidget, QLabel, QProgressBar, QSlider, QMessageBox, QHBoxLayout
+from qgis.PyQt.QtCore import QSettings, Qt
 import pandas as pd
 from ..api import *
 from qgis.core import QgsCoordinateReferenceSystem
@@ -59,7 +59,7 @@ class FinBIFDialog(QDialog):
         self.access_token_input.setText(self.settings.value("FinBIF_API_Plugin/access_token", ""))
         self.access_token_input.setToolTip('Your API access token. See more https://api.laji.fi/explorer/#/APIUser')
         
-        self.get_api_key_button = QPushButton("Get API KEY")
+        self.get_api_key_button = QPushButton("Get access token")
         self.get_api_key_button.clicked.connect(lambda: open_api_key_dialog(self))
         
         access_token_layout.addWidget(self.access_token_input)
@@ -206,7 +206,7 @@ class FinBIFDialog(QDialog):
         self.named_place_id_input.setToolTip("""Filter based on URI or Qname identifier of a NamedPlace. Use NamedPlace-API to find identifiers. Multiple values are seperated by ','. API resource: /named-places""")
         geographical_form_layout.addRow(QLabel('Named Place ID:'), self.named_place_id_input)
 
-        self.coordinate_accuracy_max_slider = QSlider(Qt.Horizontal)
+        self.coordinate_accuracy_max_slider = QSlider(Qt.Orientation.Horizontal)
         self.coordinate_accuracy_max_slider.setMinimum(0)
         self.coordinate_accuracy_max_slider.setPageStep(100)
         self.coordinate_accuracy_max_slider.setMaximum(10000)
@@ -274,6 +274,13 @@ class FinBIFDialog(QDialog):
         )
         feedback_label.setOpenExternalLinks(True)
         others_form_layout.addWidget(feedback_label)
+
+        definitions_label = QLabel(
+            '<p>What does the columns and values mean? See definitions on '
+            '<a href="https://rs.laji.fi/terms" style="color:blue; text-decoration:none;">this page</a>.</p>'
+        )
+        definitions_label.setOpenExternalLinks(True)
+        others_form_layout.addWidget(definitions_label)
 
         others_layout.addLayout(others_form_layout)
         others_tab.setLayout(others_layout)
@@ -457,7 +464,7 @@ class FinBIFDialog(QDialog):
                 f'the maximum limit of {MAX_OBSERVATIONS_LIMIT:,} records.\n\n'
                 f'Please refine your search parameters to reduce the number of results.\n\n'
                 f'Parameters:\n{param_text}',
-                QMessageBox.Ok
+                QMessageBox.StandardButton.Ok
             )
             self.is_running = False
             self.submit_button.setText('Submit')
@@ -467,11 +474,11 @@ class FinBIFDialog(QDialog):
                 None, 
                 'FinBIF_Plugin', 
                 f'Fetching {total_obs} occurrences with the following parameters:\n\n{param_text}\n\nDo you want to continue?',
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
             )
 
-        if reply == QMessageBox.No:
+        if reply == QMessageBox.StandardButton.No:
             self.is_running = False
             self.submit_button.setText('Submit')
             return

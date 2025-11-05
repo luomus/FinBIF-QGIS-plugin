@@ -1,11 +1,10 @@
 import requests
-from PyQt5.QtWidgets import QMessageBox, QApplication
+from qgis.PyQt.QtWidgets import QMessageBox, QApplication
 import json, certifi
 from functools import lru_cache
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from qgis.core import QgsMessageLog, Qgis
-from PyQt5.QtWidgets import QMessageBox, QApplication
 import os
 import geopandas as gpd
 import pandas as pd
@@ -39,14 +38,14 @@ def fetch_json_with_retry(url, max_retries=3, delay=5):
             if response.status_code in [200, 201]:
                 return response.json()
             else:
-                QgsMessageLog.logMessage(f"Attempt {attempt + 1}: HTTP {response.status_code} for {url}", "FinBIF Plugin", Qgis.Warning)
+                QgsMessageLog.logMessage(f"Attempt {attempt + 1}: HTTP {response.status_code} for {url}", "FinBIF Plugin", Qgis.MessageLevel.Warning)
         except Exception as e:
-            QgsMessageLog.logMessage(f"Attempt {attempt + 1} failed for {url}: {e}", "FinBIF Plugin", Qgis.Warning)
+            QgsMessageLog.logMessage(f"Attempt {attempt + 1} failed for {url}: {e}", "FinBIF Plugin", Qgis.MessageLevel.Warning)
             
         if attempt < max_retries - 1:  # Don't sleep on the last attempt
             time.sleep(delay)
     
-    QgsMessageLog.logMessage(f"All attempts failed for {url}", "FinBIF Plugin", Qgis.Critical)
+    QgsMessageLog.logMessage(f"All attempts failed for {url}", "FinBIF Plugin", Qgis.MessageLevel.Critical)
     return None
 
 def get_value_enums(lang='en'):
@@ -138,13 +137,13 @@ def load_collection_names(lang='en'):
             return {item['id']: item['longName'] for item in data['results']}
     
     if response:
-        QgsMessageLog.logMessage(f"Warning: Failed to load collection names: {response.status_code}", "FinBIF Plugin", Qgis.Warning)
+        QgsMessageLog.logMessage(f"Warning: Failed to load collection names: {response.status_code}", "FinBIF Plugin", Qgis.MessageLevel.Warning)
     
     return {}
 
 def _handle_request_error(error, context="API request"):
     """Handle common request errors with appropriate user messages."""
-    QgsMessageLog.logMessage(f"Error during {context}: {error}", "FinBIF Plugin", Qgis.Critical)
+    QgsMessageLog.logMessage(f"Error during {context}: {error}", "FinBIF Plugin", Qgis.MessageLevel.Critical)
     
     error_messages = {
         requests.exceptions.Timeout: f'Request timed out after {REQUEST_TIMEOUT} seconds. Please try again later.',
@@ -282,11 +281,11 @@ def renew_api_key(email: str, dialog):
         None, 
         'FinBIF_Plugin', 
         f'An API KEY already exists for this email.\n\nIf you did not find it from your email, do you want to request a new one?',
-        QMessageBox.Yes | QMessageBox.No,
-        QMessageBox.No
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.No
     )
 
-    if choice == QMessageBox.Yes:
+    if choice == QMessageBox.StandardButton.Yes:
         url = "https://api.laji.fi/v0/api-users/renew"
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         data = json.dumps({"email": email})

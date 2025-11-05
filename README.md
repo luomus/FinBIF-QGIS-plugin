@@ -10,6 +10,7 @@ The FinBIF API Plugin for QGIS allows users to fetch data from the FinBIF API an
 - Load data into QGIS as vector layers
 - Support for various query parameters including taxon, geographical, and quality parameters
 - User-friendly interface
+- Supports both Qt5 and Qt6
 
 ## Installation
 ### Installation from ZIP

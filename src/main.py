@@ -1,5 +1,5 @@
-from PyQt5.QtWidgets import QAction, QApplication, QProgressDialog, QMessageBox
-from PyQt5.QtCore import Qt
+from qgis.PyQt.QtWidgets import QAction, QApplication, QProgressDialog, QMessageBox
+from qgis.PyQt.QtCore import Qt
 from .ui.main_dialog import FinBIFDialog
 from .mappings import load_areas, load_ranges, get_lookup_table
 from .api import load_collection_names, load_informal_taxon_names, get_value_enums
@@ -23,7 +23,7 @@ class FinBIF_API_Plugin:
         
         # Show progress dialog
         progress = QProgressDialog("Loading plugin data...", "Cancel", 0, 6)
-        progress.setWindowModality(Qt.WindowModal)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setWindowTitle("FinBIF Plugin")
         progress.show()
         QApplication.processEvents()
