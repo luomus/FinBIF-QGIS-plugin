@@ -177,7 +177,7 @@ def fetch_data(params, progress_bar, epsg_string, lookup_df):
     headers = {}
     if access_token:
         headers['Authorization'] = access_token
-        headers['Api-Version'] = '2'
+        headers['Api-Version'] = '1'
     
     # Set required parameters
     processed_params.update({
@@ -330,7 +330,7 @@ def get_total_obs(params):
     headers = {}
     if access_token:
         headers['Authorization'] = access_token
-        headers['Api-Version'] = '2'
+        headers['Api-Version'] = '1'
     
     try:
         response = requests.get(full_url, params=params_copy, headers=headers, timeout=REQUEST_TIMEOUT)
