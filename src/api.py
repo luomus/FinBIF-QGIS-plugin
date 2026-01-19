@@ -54,22 +54,23 @@ def get_value_enums(lang='en'):
     first_part = fetch_json_with_retry(url)
 
     url2 = f"http://laji.fi/api/warehouse/enumeration-labels?lang={lang}"
-    second_part = fetch_json_with_retry(url2)
+    second_part = fetch_json_with_retry(url2).get('results', [])
 
     url3 = f'https://laji.fi/api/sources?lang={lang}&pageSize=100'
-    third_part = fetch_json_with_retry(url3)
+    third_part = fetch_json_with_retry(url3).get('results', [])
 
     if not first_part or not second_part or not third_part:
         raise ValueError("Error getting enumeration values.")
 
-    # Extract "enumeration" keys and "en" labels
+    # Extract "enumeration" keys and "en" labels to a dictionary
     enumerations = {
         item['enumeration']: item['label'][lang]
-        for item in second_part.get('results', [])
+        for item in second_part
         if item.get('label') and item['label'].get(lang)
     }
 
-    sources = {source['id']: source['name'] for source in third_part.get('results', []) if 'id' in source and 'name' in source}
+    # Extract source 'id' and 'name' to a dictionary
+    sources = {source['id']: source['name'] for source in third_part if 'id' in source and 'name' in source}
 
     return first_part | enumerations | sources
 
@@ -176,7 +177,7 @@ def fetch_data(params, progress_bar, epsg_string, lookup_df):
     headers = {}
     if access_token:
         headers['Authorization'] = access_token
-        headers['Api-Version'] = '1'
+        headers['Api-Version'] = '2'
     
     # Set required parameters
     processed_params.update({
@@ -239,7 +240,7 @@ def request_api_key(email: str, dialog):
     if not email:
         return
     
-    url = "https://api.laji.fi/v0/api-users"
+    url = "https://api.laji.fi/api-user"
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     data = json.dumps({"email": email})
     
@@ -286,7 +287,7 @@ def renew_api_key(email: str, dialog):
     )
 
     if choice == QMessageBox.StandardButton.Yes:
-        url = "https://api.laji.fi/v0/api-users/renew"
+        url = "https://api.laji.fi/api-user/renew"
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         data = json.dumps({"email": email})
         try:
@@ -329,7 +330,7 @@ def get_total_obs(params):
     headers = {}
     if access_token:
         headers['Authorization'] = access_token
-        headers['Api-Version'] = '1'
+        headers['Api-Version'] = '2'
     
     try:
         response = requests.get(full_url, params=params_copy, headers=headers, timeout=REQUEST_TIMEOUT)
