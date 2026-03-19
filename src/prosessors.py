@@ -5,11 +5,28 @@ import pandas as pd
 import geopandas as gpd
 import json
 
+def _ensure_python_string_dtype(series: pd.Series) -> pd.Series:
+    """Ensure a string Series uses the python string backend (not pyarrow).
+
+    Some pandas string methods delegate to `pyarrow.compute.*` functions when
+    the series is stored as `string[pyarrow]`. Some pyarrow builds/mappings (as
+    found in certain QGIS/OSGeo4W environments) may be missing those functions.
+    """
+    if isinstance(series.dtype, pd.StringDtype) and series.dtype.storage == "pyarrow":
+        return series.astype("string[python]")
+    return series
+
 def process_countries(gdf, areas_dict):
     """ Map country names to their corresponding IDs.
     """
     if 'gathering.interpretations.country' in gdf.columns:
-        gdf['gathering.interpretations.country'] = gdf['gathering.interpretations.country'].str.replace(r'http://[^/]+\.fi/', "", regex=True).map(areas_dict).fillna(gdf['gathering.interpretations.country'])
+        col = 'gathering.interpretations.country'
+        gdf[col] = (
+            _ensure_python_string_dtype(gdf[col])
+            .str.replace(r'http://[^/]+\.fi/', "", regex=True)
+            .map(areas_dict)
+            .fillna(gdf[col])
+        )
 
     return gdf
 
@@ -57,7 +74,12 @@ def map_single_value_fields(gdf, enums):
     # Process each found column
     for col in columns_to_process:
         if col in gdf.columns:  # Fixed typo: was gdf.columns.st
-            gdf[col] = gdf[col].str.replace(r'http://[^/]+\.fi/', "", regex=True).map(enums).fillna(gdf[col])
+            gdf[col] = (
+                _ensure_python_string_dtype(gdf[col])
+                .str.replace(r'http://[^/]+\.fi/', "", regex=True)
+                .map(enums)
+                .fillna(gdf[col])
+            )
     
     return gdf
 
@@ -252,7 +274,12 @@ def process_verbatim_location_values(gdf):
 def map_collection_id(gdf, collection_names):
     """Map collection IDs to collection names
     """
-    gdf['datasetName'] = gdf['document.collectionId'].str.split('/').str[-1].map(collection_names)
+    gdf['datasetName'] = (
+        _ensure_python_string_dtype(gdf['document.collectionId'])
+        .str.split('/')
+        .str[-1]
+        .map(collection_names)
+    )
     return gdf
 
 def merge_taxonomy_data(occurrence_gdf, taxonomy_df):
@@ -261,7 +288,10 @@ def merge_taxonomy_data(occurrence_gdf, taxonomy_df):
     if 'unit.linkings.taxon.informalTaxonGroups[0]' not in occurrence_gdf.columns:
         occurrence_gdf['unit.linkings.taxon.informalTaxonGroups[0]'] = None
         
-    occurrence_gdf['unit.linkings.taxon.informalTaxonGroups[0]'] = occurrence_gdf['unit.linkings.taxon.informalTaxonGroups[0]'].str.extract(r'(MVL\.\d+)')
+    occurrence_gdf['unit.linkings.taxon.informalTaxonGroups[0]'] = (
+        _ensure_python_string_dtype(occurrence_gdf['unit.linkings.taxon.informalTaxonGroups[0]'])
+        .str.extract(r'(MVL\.\d+)')
+    )
     merged_gdf = occurrence_gdf.merge(taxonomy_df, left_on='unit.linkings.taxon.informalTaxonGroups[0]', right_on='id', how='left')
 
     # Drop all unit.linkings.taxon.informalTaxonGroup[n] columns
