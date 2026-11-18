@@ -2,10 +2,7 @@ import requests
 from qgis.PyQt.QtWidgets import QMessageBox, QApplication
 import json, certifi
 from functools import lru_cache
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 from qgis.core import QgsMessageLog, Qgis
-import os
 import geopandas as gpd
 import pandas as pd
 from functools import lru_cache
@@ -111,7 +108,7 @@ def load_informal_taxon_names(lang='en'):
     """
     url = f"http://laji.fi/api/informal-taxon-groups?lang={lang}&pageSize=1000"
 
-    response = requests.get(url)
+    response = requests.get(url, timeout=REQUEST_TIMEOUT)
     if response and response.status_code in [200, 201]:
         data = response.json()
         if data:
@@ -131,7 +128,7 @@ def load_collection_names(lang='en'):
     """ Load collection names from the FinBIF API. """
     url = f"http://laji.fi/api/collections?pageSize=1500&lang={lang}"
 
-    response = requests.get(url)
+    response = requests.get(url, timeout=REQUEST_TIMEOUT)
     if response and response.status_code in [200, 201]:
         data = response.json()
         if data:
@@ -245,7 +242,7 @@ def request_api_key(email: str, dialog):
     data = json.dumps({"email": email})
     
     try:
-        response = requests.post(url, headers=headers, data=data, verify=certifi.where())
+        response = requests.post(url, headers=headers, data=data, verify=certifi.where(), timeout=REQUEST_TIMEOUT)
         if response.status_code in [200, 201]:
             QMessageBox.information(None, 'FinBIF_Plugin', 'API key request sent. Check your email for further instructions.')
         elif response.status_code == 400 and "This email has been registered already" in response.text:
@@ -254,7 +251,7 @@ def request_api_key(email: str, dialog):
             QMessageBox.warning(None, 'FinBIF_Plugin', f"Error: {response.status_code}, {response.text}")
     except requests.exceptions.SSLError as ssl_error:
         try:
-            response = requests.post(url, headers=headers, data=data, verify=False)
+            response = requests.post(url, headers=headers, data=data, verify=False, timeout=REQUEST_TIMEOUT)
             if response.status_code in [200, 201]:
                 QMessageBox.information(None, 'FinBIF_Plugin', 'API key request sent. Check your email for further instructions.')
             elif response.status_code == 400 and "This email has been registered already" in response.text:
@@ -291,14 +288,14 @@ def renew_api_key(email: str, dialog):
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         data = json.dumps({"email": email})
         try:
-            response = requests.post(url, headers=headers, data=data, verify=certifi.where())
+            response = requests.post(url, headers=headers, data=data, verify=certifi.where(), timeout=REQUEST_TIMEOUT)
             if response.status_code in [200, 201]:
                 QMessageBox.information(None, 'FinBIF_Plugin', 'New API key request sent. Check your email.')
             else:
                 QMessageBox.warning(None, 'FinBIF_Plugin', f"Retry failed: {response.status_code}, {response.text}")
         except requests.exceptions.SSLError as ssl_error:
             try:
-                response = requests.post(url, headers=headers, data=data, verify=False)
+                response = requests.post(url, headers=headers, data=data, verify=False, timeout=REQUEST_TIMEOUT)
                 if response.status_code in [200, 201]:
                     QMessageBox.information(None, 'FinBIF_Plugin', 'New API key request sent. Check your email.')
                 else:
