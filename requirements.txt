@@ -1,5 +1,4 @@
 certifi>=2024.7.4
-geopandas==1.1.0
 geopandas==0.14.3
 numpy==2.3.4
 pandas==2.3.3
